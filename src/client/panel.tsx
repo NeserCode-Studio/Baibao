@@ -12,6 +12,13 @@ import {
   type StorageMigration,
 } from './storage-api'
 import { deleteMemory, listMemory, type MemoryEntry } from './memory-api'
+import {
+  DEFAULT_JUNG,
+  getPersona,
+  savePersona,
+  type JungAxis,
+  type JungPersona,
+} from './persona-api'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
 export type TranslateBaibao = (key: BaibaoKey, params?: Record<string, unknown>) => string
@@ -27,6 +34,7 @@ export interface BaibaoPanelProps {
 
 type SectionProps = BaibaoPanelProps & { hidden: boolean }
 const SETTINGS_TABS = [
+  { id: 'persona', label: 'tabPersona' },
   { id: 'memory', label: 'tabMemory' },
   { id: 'connections', label: 'tabConnections' },
   { id: 'settings', label: 'tabSettings' },
@@ -39,7 +47,7 @@ type SettingsTab = (typeof SETTINGS_TABS)[number]['id']
  * Conversation plus memory/connection/settings surfaces in one page.
  */
 export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProps) {
-  const [tab, setTab] = useState<SettingsTab>('memory')
+  const [tab, setTab] = useState<SettingsTab>('persona')
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState(false)
   const [compact, setCompact] = useState(false)
@@ -129,6 +137,7 @@ export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProp
           </div>
 
           <div className="bb-hubBody">
+            <PersonaSection t={t} hidden={tab !== 'persona'} />
             <MemorySection t={t} hidden={tab !== 'memory'} />
             <ConnectionsSection t={t} hidden={tab !== 'connections'} />
             <SettingsSection
@@ -220,6 +229,226 @@ function CompactHeader({
         </button>
       ) : null}
     </div>
+  )
+}
+
+const JUNG_ROWS = [
+  { axis: 'energy', title: 'jungEnergy', left: 'jungIntrovert', right: 'jungExtravert' },
+  { axis: 'information', title: 'jungInformation', left: 'jungSensing', right: 'jungIntuition' },
+  { axis: 'decisions', title: 'jungDecisions', left: 'jungThinking', right: 'jungFeeling' },
+  { axis: 'lifestyle', title: 'jungLifestyle', left: 'jungJudging', right: 'jungPerceiving' },
+] as const satisfies readonly {
+  axis: JungAxis
+  title: BaibaoKey
+  left: BaibaoKey
+  right: BaibaoKey
+}[]
+
+const JUNG_POINTS = [
+  { label: 'E', axis: 'energy', positive: true, angle: -90 },
+  { label: 'S', axis: 'information', positive: true, angle: -45 },
+  { label: 'T', axis: 'decisions', positive: true, angle: 0 },
+  { label: 'J', axis: 'lifestyle', positive: true, angle: 45 },
+  { label: 'I', axis: 'energy', positive: false, angle: 90 },
+  { label: 'N', axis: 'information', positive: false, angle: 135 },
+  { label: 'F', axis: 'decisions', positive: false, angle: 180 },
+  { label: 'P', axis: 'lifestyle', positive: false, angle: 225 },
+] as const satisfies readonly {
+  label: string
+  axis: JungAxis
+  positive: boolean
+  angle: number
+}[]
+
+function JungChart({ persona, label }: { persona: JungPersona; label: string }) {
+  const centerX = 130
+  const centerY = 120
+  const point = (angle: number, radius: number): [number, number] => {
+    const radians = (angle * Math.PI) / 180
+    return [centerX + Math.cos(radians) * radius, centerY + Math.sin(radians) * radius]
+  }
+  const valueOf = (entry: (typeof JUNG_POINTS)[number]): number =>
+    50 + (persona[entry.axis] * (entry.positive ? 1 : -1)) / 2
+  const ring = (radius: number): string =>
+    JUNG_POINTS.map((entry) => point(entry.angle, radius).join(',')).join(' ')
+  const shape = JUNG_POINTS.map((entry) =>
+    point(entry.angle, 20 + (valueOf(entry) / 100) * 64).join(','),
+  ).join(' ')
+
+  return (
+    <div className="bb-jungChart">
+      <svg viewBox="0 0 260 250" role="img" aria-label={label}>
+        {[20, 40, 60, 84].map((radius) => (
+          <polygon
+            key={radius}
+            points={ring(radius)}
+            fill="none"
+            stroke="var(--dsw-alias-border-l3, #d9dee6)"
+            strokeWidth="0.75"
+          />
+        ))}
+        {JUNG_POINTS.map((entry) => {
+          const [x, y] = point(entry.angle, 84)
+          return (
+            <line
+              key={entry.label}
+              x1={centerX}
+              y1={centerY}
+              x2={x}
+              y2={y}
+              stroke="var(--dsw-alias-border-l3, #d9dee6)"
+              strokeWidth="0.75"
+            />
+          )
+        })}
+        <polygon
+          points={shape}
+          fill="var(--dsw-alias-brand-primary, #4f6ef7)"
+          fillOpacity="0.18"
+          stroke="var(--dsw-alias-brand-primary, #4f6ef7)"
+          strokeWidth="1.5"
+        />
+        {JUNG_POINTS.map((entry) => {
+          const [x, y] = point(entry.angle, 20 + (valueOf(entry) / 100) * 64)
+          return (
+            <circle
+              key={`dot-${entry.label}`}
+              cx={x}
+              cy={y}
+              r="2.5"
+              fill="var(--dsw-alias-brand-primary, #4f6ef7)"
+            />
+          )
+        })}
+        {JUNG_POINTS.map((entry) => {
+          const [x, y] = point(entry.angle, 100)
+          const anchor = x < centerX - 4 ? 'end' : x > centerX + 4 ? 'start' : 'middle'
+          return (
+            <text
+              key={`label-${entry.label}`}
+              x={x}
+              y={y}
+              textAnchor={anchor}
+              dominantBaseline="middle"
+              fontSize="11"
+              fill="var(--dsw-alias-label-secondary, #5c6570)"
+            >
+              {entry.label}
+            </text>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
+function PersonaSection({ t, hidden }: SectionProps) {
+  const [persona, setPersona] = useState<JungPersona>({ ...DEFAULT_JUNG })
+  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>(
+    'loading',
+  )
+
+  useEffect(() => {
+    let live = true
+    void getPersona().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setPersona(result.persona)
+        setStatus('ready')
+      } else {
+        setStatus('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const update = (axis: JungAxis, value: number): void => {
+    setPersona((current) => ({ ...current, [axis]: value }))
+    setStatus('ready')
+  }
+
+  const save = async (): Promise<void> => {
+    setStatus('saving')
+    const result = await savePersona(persona)
+    if (result.ok) {
+      setPersona(result.persona)
+      setStatus('saved')
+    } else {
+      setStatus('error')
+    }
+  }
+
+  return (
+    <section
+      id="bb-panel-persona"
+      role="tabpanel"
+      aria-labelledby="bb-tab-persona"
+      className="bb-section"
+      hidden={hidden}
+    >
+      <SectionHead title={t('personaTitle')} body={t('personaBody')} />
+      <div className="bb-persona">
+        <JungChart persona={persona} label={t('personaChart')} />
+        <div className="bb-jungControls">
+          {JUNG_ROWS.map((row) => (
+            <div key={row.axis} className="bb-jungRow">
+              <div className="bb-jungRowTop">
+                <span>{t(row.title)}</span>
+                <span className="bb-jungValue">{persona[row.axis]}</span>
+              </div>
+              <input
+                className="bb-jungRange"
+                type="range"
+                min="-100"
+                max="100"
+                step="5"
+                value={persona[row.axis]}
+                aria-label={t(row.title)}
+                onChange={(event) => update(row.axis, Number(event.target.value))}
+              />
+              <div className="bb-jungPoles">
+                <span>{t(row.left)}</span>
+                <span>{t(row.right)}</span>
+              </div>
+            </div>
+          ))}
+          <div className="bb-personaActions">
+            <button
+              type="button"
+              className="bb-personaBtn"
+              onClick={() => void save()}
+              disabled={status === 'saving'}
+            >
+              {t('personaSave')}
+            </button>
+            <button
+              type="button"
+              className="bb-storageLink"
+              onClick={() => {
+                setPersona({ ...DEFAULT_JUNG })
+                setStatus('ready')
+              }}
+              disabled={status === 'saving'}
+            >
+              {t('personaReset')}
+            </button>
+          </div>
+          {status === 'saved' && (
+            <p className="bb-storageOk" role="status">
+              {t('personaSaved')}
+            </p>
+          )}
+          {status === 'error' && (
+            <p className="bb-storageError" role="alert">
+              {t('personaFailed')}
+            </p>
+          )}
+          <p className="bb-storageHint">{t('personaNewSession')}</p>
+        </div>
+      </div>
+    </section>
   )
 }
 

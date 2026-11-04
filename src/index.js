@@ -329,7 +329,79 @@ async function deleteBackup(id) {
 }
 
 const MEMORY_KINDS = new Set(['fact', 'preference', 'episode'])
+const JUNG_AXES = ['energy', 'information', 'decisions', 'lifestyle']
+const DEFAULT_JUNG = {
+  energy: -20,
+  information: 20,
+  decisions: 30,
+  lifestyle: 10,
+}
 let memoryQueue = Promise.resolve()
+
+function normalizeJung(input) {
+  const source = input !== null && typeof input === 'object' ? input : {}
+  const result = {}
+  for (const axis of JUNG_AXES) {
+    const raw = source[axis]
+    const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : DEFAULT_JUNG[axis]
+    result[axis] = Math.max(-100, Math.min(100, Math.round(value)))
+  }
+  return result
+}
+
+async function configFile() {
+  const location = await readLocation()
+  return path.join(location.root, 'config', 'baibao.json')
+}
+
+async function readConfigData() {
+  try {
+    const parsed = JSON.parse(await readFile(await configFile(), 'utf8'))
+    if (parsed !== null && typeof parsed === 'object') return parsed
+  } catch {
+    // Missing or malformed config starts from defaults.
+  }
+  return { version: 1 }
+}
+
+async function writeConfigData(data) {
+  const file = await configFile()
+  await mkdir(path.dirname(file), { recursive: true })
+  const temp = `${file}.tmp`
+  await writeFile(temp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  await rename(temp, file)
+}
+
+async function readPersona() {
+  const config = await readConfigData()
+  return normalizeJung(config.persona?.jung)
+}
+
+async function writePersona(input) {
+  const config = await readConfigData()
+  const jung = normalizeJung(input?.jung ?? input)
+  config.persona = { jung }
+  config.updatedAt = new Date().toISOString()
+  await writeConfigData(config)
+  return { jung }
+}
+
+function pole(value, negative, positive) {
+  if (value <= -25) return negative
+  if (value >= 25) return positive
+  return '居中'
+}
+
+function personaPrompt(persona) {
+  return [
+    '你当前的人格倾向（荣格四轴，-100 到 100）：',
+    `- 能量来源：${pole(persona.energy, '偏内向，先观察再表达', '偏外向，主动交流')}`,
+    `- 信息获取：${pole(persona.information, '偏实感，重视事实与细节', '偏直觉，重视模式与可能性')}`,
+    `- 决策方式：${pole(persona.decisions, '偏思考，先看逻辑一致性', '偏情感，先照顾人的感受')}`,
+    `- 生活方式：${pole(persona.lifestyle, '偏判断，喜欢计划与收束', '偏感知，保持开放与探索')}`,
+    '让这些倾向影响语气和判断，但不要向用户声明类型标签，也不要把倾向当作事实或借口。',
+  ].join('\n')
+}
 
 function withMemoryLock(task) {
   const next = memoryQueue.then(task, task)
@@ -629,20 +701,21 @@ export function apply(ctx) {
 
   ctx.effect(
     () =>
-      ctx.on('agent/created', (payload) => {
+      ctx.on('agent/created', function (payload) {
         const agent = payload.agent
+        const agentCtx = agent?.ctx
         const cwd = agent.session?.header?.cwd
         if (
           baibaoWorkspacePath === null ||
           typeof cwd !== 'string' ||
           normalizePath(cwd) !== normalizePath(baibaoWorkspacePath) ||
-          agent.ctx === undefined
+          agentCtx === undefined
         ) {
           return
         }
         const presets = ctx.get('agentPresets')
         void (async () => {
-          let selected = presets?.composedPreset?.(agent.ctx) === 'baibao'
+          let selected = presets?.composedPreset?.(agentCtx) === 'baibao'
           if (!selected && typeof presets?.select === 'function') {
             try {
               await presets.select(agent, 'baibao')
@@ -653,7 +726,7 @@ export function apply(ctx) {
           }
           if (!selected) {
             try {
-              agent.ctx.systemPrompt.section({
+              agentCtx.systemPrompt.section({
                 name: 'baibao-persona',
                 order: 50,
                 text: PERSONA_TEXT,
@@ -664,7 +737,7 @@ export function apply(ctx) {
           }
           try {
             for (const tool of memoryTools()) {
-              agent.ctx.tools.register(tool)
+              agentCtx.tools.register(tool)
             }
           } catch {
             // A resumed agent may already own these tools in this scope.
@@ -672,7 +745,7 @@ export function apply(ctx) {
           const entries = await listMemory()
           if (entries.length > 0) {
             try {
-              agent.ctx.systemPrompt.section({
+              agentCtx.systemPrompt.section({
                 name: 'baibao-memory-context',
                 order: 60,
                 text: renderMemoryContext(entries),
@@ -681,9 +754,19 @@ export function apply(ctx) {
               // A resumed agent may already own the section in this scope.
             }
           }
-          agent.ctx.effect(
+          const persona = await readPersona().catch(() => ({ ...DEFAULT_JUNG }))
+          try {
+            agentCtx.systemPrompt.section({
+              name: 'baibao-persona-tuning',
+              order: 51,
+              text: personaPrompt(persona),
+            })
+          } catch {
+            // A resumed agent may already own the section in this scope.
+          }
+          agentCtx.effect(
             () =>
-              agent.ctx.on('agent/turn-stopping', (payload) => {
+              agentCtx.on('agent/turn-stopping', (payload) => {
                 const previous = lastConsolidatedTurns.get(agent.id)
                 if (previous === payload.turn) return
                 lastConsolidatedTurns.set(agent.id, payload.turn)
@@ -861,6 +944,38 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: memory route',
+    )
+
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/persona',
+          handler: async (request, response) => {
+            try {
+              if (request.method === 'GET') {
+                sendJson(response, 200, { ok: true, persona: await readPersona() })
+                return
+              }
+
+              if (request.method === 'POST') {
+                const body = await readJson(request)
+                const persona = await writePersona(body)
+                sendJson(response, 200, { ok: true, persona })
+                return
+              }
+
+              response.writeHead(405, { allow: 'GET, POST' })
+              response.end()
+            } catch (error) {
+              sendJson(response, 500, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        }),
+      'dsh-baibao: persona route',
     )
 
     hostCtx.effect(

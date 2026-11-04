@@ -329,6 +329,103 @@
   color: var(--dsw-alias-label-secondary, #5c6570);
 }
 
+.bb-persona {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.bb-jungChart {
+  padding: 12px;
+  background: var(--dsw-alias-button-elevated-fill, #ffffff);
+  border: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
+  border-radius: var(--dsw-radius-md, 10px);
+}
+
+.bb-jungChart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.bb-jungControls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bb-jungRow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bb-jungRowTop,
+.bb-jungPoles {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bb-jungRowTop {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bb-jungValue {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary, #8b93a1);
+}
+
+.bb-jungRange {
+  width: 100%;
+  accent-color: var(--dsw-alias-brand-primary, #4f6ef7);
+}
+
+.bb-jungPoles {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #8b93a1);
+}
+
+.bb-personaActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.bb-personaBtn {
+  height: 32px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--dsw-alias-brand-primary, #4f6ef7);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.bb-personaBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bb-personaBtn:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, #4f6ef7);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .bb-persona {
+    grid-template-columns: 1fr;
+  }
+}
+
 .bb-memoryEmpty,
 .bb-memoryError {
   margin: 0;
