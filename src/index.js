@@ -375,17 +375,39 @@ function normalizeMemoryInput(input) {
   return { text, kind, tags }
 }
 
+function memoryTerms(query) {
+  const raw = query.trim().toLowerCase()
+  if (raw === '') return []
+  const parts = raw.split(/[\s,，。.;；、/\\|:：()（）\[\]{}]+/).filter(Boolean)
+  const terms = new Set()
+  for (const part of parts) {
+    if (/[\u3400-\u9fff]/.test(part)) {
+      if (part.length <= 2) {
+        terms.add(part)
+      } else {
+        for (let index = 0; index < part.length - 1; index += 1) {
+          terms.add(part.slice(index, index + 2))
+        }
+      }
+    } else if (part.length >= 2) {
+      terms.add(part)
+    }
+  }
+  if (terms.size === 0) terms.add(raw)
+  return [...terms]
+}
+
 async function listMemory(query = '') {
   const data = await readMemoryData()
-  const needle = query.trim().toLowerCase()
+  const terms = memoryTerms(query)
   const entries = data.entries
     .filter((entry) => {
-      if (needle === '') return true
-      return (
-        String(entry.text ?? '').toLowerCase().includes(needle) ||
-        (Array.isArray(entry.tags) &&
-          entry.tags.some((tag) => String(tag).toLowerCase().includes(needle)))
-      )
+      if (terms.length === 0) return true
+      const text = String(entry.text ?? '').toLowerCase()
+      const tags = Array.isArray(entry.tags)
+        ? entry.tags.map((tag) => String(tag).toLowerCase())
+        : []
+      return terms.some((term) => text.includes(term) || tags.some((tag) => tag.includes(term)))
     })
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
   return entries
