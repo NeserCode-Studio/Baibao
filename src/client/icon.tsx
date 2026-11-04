@@ -1,15 +1,15 @@
+import { useId } from 'react'
+
 /**
- * The 百宝 brand glyph: a whale with a four-point spark for a spout.
+ * The 百宝 brand glyph: the DeepSeek whale with its tail and eye replaced by
+ * four-point light stars.
  *
- * The whale is the DeepSeek motif; the spark is the light. The eye is a
- * negative-space hole so the silhouette survives at 16px without a second
- * colour.
+ * The body path is the official whale mark: the tail flukes are removed by a
+ * mask and replaced by a star, and the eye is cut as a smaller star. The whale
+ * stays recognisable; the two stars carry the light motif.
  *
- * Colour comes from `currentColor` alone — the sidebar paints panel icons with
- * the row's own colour, and the shell switches that colour between themes and
- * between expanded and collapsed states. The outline is a single 16-unit set
- * so the shape survives the 16px sidebar row and scales up unchanged for the
- * larger empty state.
+ * Colour comes from `currentColor` alone, so the sidebar can paint the glyph
+ * with the active row colour in both themes.
  */
 export interface BaibaoIconProps {
   /** Square edge in pixels. */
@@ -18,26 +18,57 @@ export interface BaibaoIconProps {
   active?: boolean
 }
 
+const WHALE_BODY =
+  'M23.0584 4.95203C22.8129 4.83203 22.7074 5.06103 22.5639 5.17704C22.5149 5.21454 22.4734 5.26354 22.4319 5.308'
+  + '54C22.0734 5.69155 21.6543 5.94306 21.1073 5.91306C20.3073 5.86806 19.6243 6.11957 19.0203 6.73158C18.8918 5.9'
+  + '7706 18.4652 5.52655 17.8162 5.23754C17.4767 5.08753 17.1332 4.93703 16.8952 4.61052C16.7292 4.37801 16.6837 4'
+  + '.11901 16.6007 3.8635C16.5477 3.70949 16.4952 3.55199 16.3177 3.52549C16.1252 3.49549 16.0497 3.65699 15.9742 '
+  + '3.792C15.6722 4.34401 15.5552 4.95203 15.5667 5.56805C15.5932 6.95359 16.1782 8.05712 17.3407 8.84215C17.4727 '
+  + '8.93215 17.5067 9.02215 17.4652 9.15366C17.3857 9.42416 17.2917 9.68667 17.2087 9.95718C17.1557 10.1297 17.076'
+  + '7 10.1677 16.8917 10.0922C16.2537 9.82568 15.7027 9.43117 15.2156 8.95465C14.3891 8.15513 13.6416 7.2726 12.70'
+  + '96 6.58158C12.4906 6.42007 12.2716 6.27007 12.045 6.12707C11.094 5.20354 12.1696 4.44502 12.4186 4.35501C12.67'
+  + '91 4.26101 12.5091 3.938 11.6675 3.942C10.826 3.9455 10.056 4.22751 9.07446 4.60302C8.93096 4.65952 8.77995 4.'
+  + '70052 8.62545 4.73452C7.73492 4.56552 6.80989 4.52802 5.84386 4.63702C4.02481 4.83953 2.57177 5.69955 1.50373 '
+  + '7.1676C0.220694 8.93215 -0.0813148 10.9372 0.288196 13.0283C0.676708 15.2323 1.80174 17.0569 3.53029 18.4834C5'
+  + '.32285 19.9625 7.38741 20.6875 9.74298 20.5485C11.1735 20.466 12.7661 20.2745 14.5626 18.7539C15.0156 18.9795 '
+  + '15.4912 19.0695 16.2797 19.137C16.8872 19.1935 17.4722 19.107 17.9252 19.013C18.6347 18.8629 18.5857 18.2059 1'
+  + '8.3292 18.0854C16.2497 17.1169 16.7062 17.5109 16.2912 17.1919C17.3477 15.9419 18.9618 13.7198 19.4598 10.6942'
+  + 'C19.5088 10.3602 19.5713 9.88968 19.5638 9.61917C19.5598 9.45417 19.5978 9.39016 19.7863 9.37116C20.3073 9.311'
+  + '16 20.8128 9.16866 21.2773 8.91315C22.6249 8.17713 23.1684 6.96809 23.2964 5.51905C23.3154 5.29754 23.2924 5.0'
+  + '6853 23.0584 4.95203Z M11.3165 17.9954C9.30097 16.4109 8.32344 15.8894 7.91992 15.9119C7.54241 15.9344 7.61042'
+  + ' 16.3664 7.69342 16.6479C7.78042 16.9259 7.89342 17.1174 8.05193 17.3614C8.16143 17.5229 8.23694 17.7629 7.942'
+  + '43 17.9434C7.29341 18.3449 6.16487 17.8084 6.11187 17.7819C4.79833 17.0084 3.7003 15.9874 2.92628 14.5908C2.17'
+  + '875 13.2468 1.74474 11.8047 1.67324 10.2657C1.65424 9.89418 1.76374 9.76267 2.13375 9.69517C2.62077 9.60517 3.'
+  + '12278 9.58617 3.6093 9.65767C5.66636 9.95818 7.41741 10.8777 8.88545 12.3348C9.72348 13.1643 10.3575 14.1558 1'
+  + '1.0105 15.1243C11.705 16.1529 12.4521 17.1329 13.4036 17.9364C13.7396 18.2179 14.0076 18.4319 14.2641 18.5899C'
+  + '13.4906 18.6764 12.1996 18.6949 11.3165 17.9964V17.9954Z'
+
+const EYE_STAR = 'M16.2 9.9c.3 1.55 1.45 2.7 3 3-1.55.3-2.7 1.45-3 3-.3-1.55-1.45-2.7-3-3 1.55-.3 2.7-1.45 3-3Z'
+
+const TAIL_STAR = 'M20.5 3.4c.35 1.65 1.65 2.95 3.3 3.3-1.65.35-2.95 1.65-3.3 3.3-.35-1.65-1.65-2.95-3.3-3.3 1.65-.35 2.95-1.65 3.3-3.3Z'
+
 export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
+  const maskId = `bb-${useId().replace(/:/g, '')}`
   return (
     <svg
       aria-hidden="true"
       focusable="false"
       width={size}
       height={size}
-      viewBox="0 0 16 16"
+      viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path
-        fillRule="evenodd"
-        d="M2.4 8.4c0-2.2 2.2-3.9 4.9-3.9 1.6 0 3 .6 4 1.7l2.6-1.8-.5 2.4 1.5.9-2.5 1.1c-.8 2.2-2.9 3.6-5.3 3.6-2.9 0-5.2-1.8-5.2-4Zm3.1-1.1a.72.72 0 1 0 0 1.44.72.72 0 0 0 0-1.44Z"
-        fill="currentColor"
-      />
-      <path
-        d="M6.4 1.1c.2.95.85 1.6 1.8 1.8-.95.2-1.6.85-1.8 1.8-.2-.95-.85-1.6-1.8-1.8.95-.2 1.6-.85 1.8-1.8Z"
-        fill="currentColor"
-      />
+      <defs>
+        <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+          <rect width="24" height="24" fill="white" />
+          <rect x="15.2" y="3" width="8.8" height="5" fill="black" />
+          <path d={TAIL_STAR} fill="black" />
+          <path d={EYE_STAR} fill="black" />
+        </mask>
+      </defs>
+      <path d={WHALE_BODY} fill="currentColor" mask={`url(#${maskId})`} />
+      <path d={TAIL_STAR} fill="currentColor" />
     </svg>
   )
 }
