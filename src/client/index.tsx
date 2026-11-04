@@ -78,9 +78,16 @@ export function apply(ctx: Context): void {
       throw new Error(result.error ?? 'start-failed')
     }
     const uiWorkspace = ctx.get('uiWorkspace') as
-      | { openSession?: (target: { kind: 'session'; sessionId: string }) => void }
+      | {
+          openWorkspace?: (workspaceId: string) => Promise<void>
+          openSession?: (target: string) => void
+        }
       | undefined
-    uiWorkspace?.openSession?.({ kind: 'session', sessionId: result.sessionId })
+    if (uiWorkspace?.openWorkspace !== undefined && result.workspace !== undefined) {
+      await uiWorkspace.openWorkspace(result.workspace.id)
+    } else {
+      uiWorkspace?.openSession?.(result.sessionId)
+    }
     ctx.layout.selectPanel('conversation' as MainPanelId)
   }
 
