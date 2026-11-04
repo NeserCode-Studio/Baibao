@@ -139,11 +139,13 @@ npm run dev          # 监听 src/，持续重建 lib/client.js
 
 第一次挂载前必须已经有 `lib/client.js` 和 `lib/index.js`；否则 profile 会在启动时找不到客户端 bundle。
 
+> **安装新插件后需要重启一次应用。** DSH 的 `clientModules` 在启动时扫描客户端 entry；运行中 `install_bundle` 只会让 Host 行生效，新的 client entry 不会进入当前 graph（实测 `clientPath` 为 `undefined`）。重启后才会出现侧栏「百宝」；之后的客户端源码修改才走 HMR。
+
 之后修改 `src/client/**`（组件、词典、CSS）：
 
 1. esbuild 重建 `lib/client.js`；
 2. DSH 的 client HMR 发现 bundle 变化，替换客户端模块；
-3. 正常情况下不需要刷新页面，约 0.5–1s 后生效。
+3. 不需要刷新页面，约 1–2s 后生效（2026-11-04 已用临时 `main` slot 探针实测）。
 
 限制与排查：
 
