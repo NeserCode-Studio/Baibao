@@ -536,6 +536,19 @@ function memoryTools() {
   ]
 }
 
+function renderMemoryContext(entries) {
+  const lines = entries.slice(0, 12).map((entry) => {
+    const text = String(entry.text ?? '').replace(/\s+/g, ' ').trim()
+    const clipped = text.length > 180 ? `${text.slice(0, 179)}…` : text
+    return `- [${entry.kind}] ${clipped}`
+  })
+  return [
+    '以下是从百宝长期记忆里召回的条目，可能相关也可能过时。',
+    '只在确实相关时使用；需要更多时调用 memory_search；不要向用户机械复述全部记忆。',
+    ...lines,
+  ].join('\n')
+}
+
 export function apply(ctx) {
   presetsReady = new Promise((resolve) => {
     presetsResolve = resolve
@@ -593,6 +606,20 @@ export function apply(ctx) {
         } catch {
           // A resumed agent may already own these tools in this scope.
         }
+        void listMemory()
+          .then((entries) => {
+            if (entries.length === 0) return
+            try {
+              agent.ctx.systemPrompt.section({
+                name: 'baibao-memory-context',
+                order: 60,
+                text: renderMemoryContext(entries),
+              })
+            } catch {
+              // A resumed agent may already own the section in this scope.
+            }
+          })
+          .catch(() => {})
       }),
     'dsh-baibao: persona section',
   )
