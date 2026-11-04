@@ -11,6 +11,7 @@ import {
   type StorageInfo,
   type StorageMigration,
 } from './storage-api'
+import { deleteMemory, listMemory, type MemoryEntry } from './memory-api'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
 export type TranslateBaibao = (key: BaibaoKey, params?: Record<string, unknown>) => string
@@ -231,12 +232,112 @@ function MemorySection({ t, hidden }: SectionProps) {
       hidden={hidden}
     >
       <SectionHead title={t('memoryTitle')} body={t('memoryBody')} />
-      <div className="bb-grid">
-        <Card title={t('memoryCoreTitle')} body={t('memoryCoreBody')} badge={t('planned')} />
-        <Card title={t('memoryEpisodeTitle')} body={t('memoryEpisodeBody')} badge={t('planned')} />
-        <Card title={t('memorySemanticTitle')} body={t('memorySemanticBody')} badge={t('planned')} />
-      </div>
+      <MemoryList t={t} />
     </section>
+  )
+}
+
+function MemoryList({ t }: BaibaoPanelProps) {
+  const [entries, setEntries] = useState<MemoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void listMemory().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setEntries(result.entries)
+        setFailed(false)
+      } else {
+        setFailed(true)
+      }
+      setLoading(false)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const remove = async (id: string): Promise<void> => {
+    const result = await deleteMemory(id)
+    if (result.ok) {
+      setEntries((current) => current.filter((entry) => entry.id !== id))
+      setPendingDelete(null)
+      setFailed(false)
+    } else {
+      setFailed(true)
+    }
+  }
+
+  if (loading) return <p className="bb-memoryEmpty">{t('memoryLoading')}</p>
+  if (failed) {
+    return (
+      <p className="bb-memoryError" role="alert">
+        {t('memoryFailed')}
+      </p>
+    )
+  }
+  if (entries.length === 0) return <p className="bb-memoryEmpty">{t('memoryEmpty')}</p>
+
+  return (
+    <ul className="bb-memoryList">
+      {entries.map((entry) => {
+        const kindKey: BaibaoKey =
+          entry.kind === 'preference'
+            ? 'memoryKindPreference'
+            : entry.kind === 'episode'
+              ? 'memoryKindEpisode'
+              : 'memoryKindFact'
+        return (
+          <li key={entry.id} className="bb-memoryItem">
+            <div className="bb-memoryTop">
+              <span className="bb-memoryKind">{t(kindKey)}</span>
+              <span className="bb-memoryDate">
+                {new Date(entry.createdAt).toLocaleDateString()}
+              </span>
+            </div>
+            <p className="bb-memoryText">{entry.text}</p>
+            {entry.tags.length > 0 && (
+              <p className="bb-memoryTags">
+                {entry.tags.map((tag) => (
+                  <span key={tag} className="bb-memoryTag">
+                    #{tag}
+                  </span>
+                ))}
+              </p>
+            )}
+            {pendingDelete === entry.id ? (
+              <div className="bb-memoryActions">
+                <button
+                  type="button"
+                  className="bb-storageDangerLink"
+                  onClick={() => void remove(entry.id)}
+                >
+                  {t('memoryDeleteConfirm')}
+                </button>
+                <button
+                  type="button"
+                  className="bb-storageLink"
+                  onClick={() => setPendingDelete(null)}
+                >
+                  {t('memoryCancel')}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="bb-storageLink"
+                onClick={() => setPendingDelete(entry.id)}
+              >
+                {t('memoryDelete')}
+              </button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

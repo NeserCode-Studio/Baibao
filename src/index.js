@@ -328,6 +328,214 @@ async function deleteBackup(id) {
   await rm(target, { recursive: true, force: true })
 }
 
+const MEMORY_KINDS = new Set(['fact', 'preference', 'episode'])
+let memoryQueue = Promise.resolve()
+
+function withMemoryLock(task) {
+  const next = memoryQueue.then(task, task)
+  memoryQueue = next.then(
+    () => {},
+    () => {},
+  )
+  return next
+}
+
+async function memoryFile() {
+  const location = await readLocation()
+  return path.join(location.root, 'memory', 'memory.json')
+}
+
+async function readMemoryData() {
+  try {
+    const parsed = JSON.parse(await readFile(await memoryFile(), 'utf8'))
+    if (parsed !== null && Array.isArray(parsed.entries)) {
+      return { version: 1, entries: parsed.entries }
+    }
+  } catch {
+    // A missing or malformed file starts empty.
+  }
+  return { version: 1, entries: [] }
+}
+
+async function writeMemoryData(data) {
+  const file = await memoryFile()
+  await mkdir(path.dirname(file), { recursive: true })
+  const temp = `${file}.tmp`
+  await writeFile(temp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  await rename(temp, file)
+}
+
+function normalizeMemoryInput(input) {
+  const text = typeof input.text === 'string' ? input.text.trim() : ''
+  if (text === '' || text.length > 4000) throw new Error('invalid-memory-text')
+  const kind = MEMORY_KINDS.has(input.kind) ? input.kind : 'fact'
+  const tags = Array.isArray(input.tags)
+    ? input.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '').slice(0, 12)
+    : []
+  return { text, kind, tags }
+}
+
+async function listMemory(query = '') {
+  const data = await readMemoryData()
+  const needle = query.trim().toLowerCase()
+  const entries = data.entries
+    .filter((entry) => {
+      if (needle === '') return true
+      return (
+        String(entry.text ?? '').toLowerCase().includes(needle) ||
+        (Array.isArray(entry.tags) &&
+          entry.tags.some((tag) => String(tag).toLowerCase().includes(needle)))
+      )
+    })
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+  return entries
+}
+
+async function saveMemory(input) {
+  return withMemoryLock(async () => {
+    const data = await readMemoryData()
+    const normalized = normalizeMemoryInput(input)
+    const now = new Date().toISOString()
+    const entry = {
+      id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ...normalized,
+      createdAt: now,
+      updatedAt: now,
+    }
+    data.entries.push(entry)
+    await writeMemoryData(data)
+    return entry
+  })
+}
+
+async function deleteMemory(id) {
+  return withMemoryLock(async () => {
+    const data = await readMemoryData()
+    const index = data.entries.findIndex((entry) => entry.id === id)
+    if (index < 0) return false
+    data.entries.splice(index, 1)
+    await writeMemoryData(data)
+    return true
+  })
+}
+
+async function searchMemory(query, limit = 10) {
+  const entries = await listMemory(query)
+  return entries.slice(0, Math.max(1, Math.min(50, limit)))
+}
+
+function memoryTools() {
+  return [
+    {
+      name: 'memory_save',
+      description:
+        'Save one durable fact, user preference, or episode about the user. Use only for information worth remembering across conversations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The memory, written as a standalone sentence.' },
+          kind: { type: 'string', enum: ['fact', 'preference', 'episode'] },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['text'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            text: { type: 'string' },
+          },
+          required: ['id', 'text'],
+          additionalProperties: false,
+        },
+        render: (value) => [{ type: 'text', text: `记得了：${value.text}` }],
+      },
+      execute: async (input) => {
+        const entry = await saveMemory(input)
+        return { id: entry.id, text: entry.text }
+      },
+    },
+    {
+      name: 'memory_search',
+      description: 'Search Baibao long-term memory for facts, preferences, or episodes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          limit: { type: 'number' },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            entries: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  text: { type: 'string' },
+                  kind: { type: 'string' },
+                },
+                required: ['id', 'text', 'kind'],
+              },
+            },
+          },
+          required: ['entries'],
+          additionalProperties: false,
+        },
+        render: (value) => [
+          {
+            type: 'text',
+            text:
+              value.entries.length === 0
+                ? '没有找到相关记忆。'
+                : value.entries.map((entry) => `- ${entry.text}`).join('\n'),
+          },
+        ],
+      },
+      execute: async (input) => {
+        const entries = await searchMemory(
+          typeof input.query === 'string' ? input.query : '',
+          typeof input.limit === 'number' ? input.limit : 10,
+        )
+        return {
+          entries: entries.map((entry) => ({
+            id: entry.id,
+            text: entry.text,
+            kind: entry.kind,
+          })),
+        }
+      },
+    },
+    {
+      name: 'memory_forget',
+      description: 'Delete one Baibao memory by id when the user asks to forget it.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: { deleted: { type: 'boolean' } },
+          required: ['deleted'],
+          additionalProperties: false,
+        },
+        render: (value) => [{ type: 'text', text: value.deleted ? '已删除。' : '没有找到该记忆。' }],
+      },
+      execute: async (input) => ({ deleted: await deleteMemory(input.id) }),
+    },
+  ]
+}
+
 export function apply(ctx) {
   presetsReady = ensureBaibaoPreset(ctx)
   void readLocation()
@@ -350,15 +558,24 @@ export function apply(ctx) {
           return
         }
         const presets = ctx.get('agentPresets')
-        if (presets?.composedPreset?.(agent.ctx) === 'baibao') return
+        const isBaibaoPreset = presets?.composedPreset?.(agent.ctx) === 'baibao'
+        if (!isBaibaoPreset) {
+          try {
+            agent.ctx.systemPrompt.section({
+              name: 'baibao-persona',
+              order: 50,
+              text: PERSONA_TEXT,
+            })
+          } catch {
+            // A resumed agent may already own the section in this scope.
+          }
+        }
         try {
-          agent.ctx.systemPrompt.section({
-            name: 'baibao-persona',
-            order: 50,
-            text: PERSONA_TEXT,
-          })
+          for (const tool of memoryTools()) {
+            agent.ctx.tools.register(tool)
+          }
         } catch {
-          // A resumed agent may already own the section in this scope.
+          // A resumed agent may already own these tools in this scope.
         }
       }),
     'dsh-baibao: persona section',
@@ -482,6 +699,53 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: storage backups route',
+    )
+
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/memory',
+          handler: async (request, response) => {
+            try {
+              if (request.method === 'GET') {
+                const url = new URL(request.url ?? '/', 'http://localhost')
+                sendJson(response, 200, {
+                  ok: true,
+                  entries: await listMemory(url.searchParams.get('q') ?? ''),
+                })
+                return
+              }
+
+              if (request.method === 'POST') {
+                const body = await readJson(request)
+                const entry = await saveMemory(body)
+                sendJson(response, 200, { ok: true, entry })
+                return
+              }
+
+              if (request.method === 'DELETE') {
+                const url = new URL(request.url ?? '/', 'http://localhost')
+                const id = url.searchParams.get('id')
+                if (id === null || id === '') {
+                  sendJson(response, 400, { ok: false, error: 'missing-memory-id' })
+                  return
+                }
+                sendJson(response, 200, { ok: true, deleted: await deleteMemory(id) })
+                return
+              }
+
+              response.writeHead(405, { allow: 'GET, POST, DELETE' })
+              response.end()
+            } catch (error) {
+              sendJson(response, 500, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        }),
+      'dsh-baibao: memory route',
     )
 
     hostCtx.effect(
