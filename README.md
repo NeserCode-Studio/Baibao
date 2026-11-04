@@ -36,16 +36,16 @@ DSH 里的一个**独立 Agent**：有自己的性格、跨会话的长期记忆
 ```
 assets/icon.svg        百宝品牌图标（宝箱作为名字的吉祥物）
 src/index.js           宿主入口：M0 无行为，只让包进入 profile 插件树
-src/client/index.tsx   客户端入口：侧栏行 + 百宝控制台
-src/client/panel.tsx   控制台骨架：对话 / 记忆 / 连接 / 设置
+src/client/index.tsx   客户端入口：侧栏行 + 百宝面板
+src/client/panel.tsx   面板骨架：对话页 + 设置面板（记忆 / 连接 / 设置）
 src/client/panel.css   仅使用 DSH 主题变量
-src/client/icon.tsx    侧栏字形（currentColor）
+src/client/icon.tsx    侧栏字形与设置/返回图标（currentColor）
 src/client/locales.ts  zh / en 词典（typed namespace）
 build.mjs              esbuild → window.__ModuleLoader__ 包封装
 cordis.patch.yml       bundle 挂载声明
 ```
 
-控制台目前是**结构预览**：四个 tab 说明百宝会怎么工作，具体能力尚未接入。
+面板目前是**对话页 + 设置面板**的结构预览：对话页只有空态和 composer，发送能力尚未接入；记忆/连接/设置三类内容都在设置面板里。
 
 ---
 
@@ -53,11 +53,9 @@ cordis.patch.yml       bundle 挂载声明
 
 ```text
 Client（浏览器）
-  sidebar 入口 → 百宝控制台（main: dsh-baibao）
-                  ├─ 对话：打开原生 Session
-                  ├─ 记忆：core / episode / semantic 浏览器
-                  ├─ 连接：触发器、收件箱、免打扰
-                  └─ 设置：人格、模型、记忆、推送
+  sidebar 入口 → 百宝面板（main: dsh-baibao）
+                  ├─ 对话页：原生 Session / 空态 / composer
+                  └─ 设置面板：记忆 / 连接 / 设置
   原生 Conversation 的百宝 chrome（header / composer dock / message actions）
 
 Host（Node）

@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
-import { BaibaoIcon } from './icon'
+import { BackIcon, BaibaoIcon, SettingsIcon } from './icon'
 import type { BaibaoKey } from './locales'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
@@ -11,122 +11,158 @@ export interface BaibaoPanelProps {
 }
 
 type SectionProps = BaibaoPanelProps & { hidden: boolean }
+type View = 'chat' | 'settings'
 
-const TABS = [
-  { id: 'chat', label: 'tabChat' },
+const SETTINGS_TABS = [
   { id: 'memory', label: 'tabMemory' },
   { id: 'connections', label: 'tabConnections' },
   { id: 'settings', label: 'tabSettings' },
 ] as const satisfies readonly { id: string; label: BaibaoKey }[]
 
-type Tab = (typeof TABS)[number]['id']
+type SettingsTab = (typeof SETTINGS_TABS)[number]['id']
 
 /**
- * The 百宝 console behind the sidebar row.
+ * The 百宝 panel: a chat page, with memory/connections/settings moved behind
+ * one settings action.
  *
- * M0 keeps this panel honest: it shows the product shape (chat, memory,
- * connections, settings) without pretending the agent runtime exists. Each tab
- * is replaced by a real surface in the milestones listed in `.agent/plan.md`.
+ * M0 keeps the chat honest: the shell and composer are here, but sending is
+ * disabled until M2 wires the native DSH session. The settings view is the
+ * single home for everything that is not conversation.
  */
 export function BaibaoPanel({ t }: BaibaoPanelProps) {
-  const [tab, setTab] = useState<Tab>('chat')
-
-  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, current: Tab): void => {
-    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-    if (delta === 0) return
-    event.preventDefault()
-    const index = TABS.findIndex((item) => item.id === current)
-    const next = TABS[(index + delta + TABS.length) % TABS.length]
-    if (next === undefined) return
-    setTab(next.id)
-    document.getElementById(`bb-tab-${next.id}`)?.focus()
-  }
+  const [view, setView] = useState<View>('chat')
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('memory')
 
   return (
     <div className="bb-root">
-      <div className="bb-shell">
-        <header className="bb-head">
-          <span className="bb-mark">
-            <BaibaoIcon size={30} />
+      {view === 'chat' ? (
+        <ChatView t={t} onOpenSettings={() => setView('settings')} />
+      ) : (
+        <SettingsView
+          t={t}
+          tab={settingsTab}
+          onTab={setSettingsTab}
+          onBack={() => setView('chat')}
+        />
+      )}
+    </div>
+  )
+}
+
+function ChatView({ t, onOpenSettings }: BaibaoPanelProps & { onOpenSettings: () => void }) {
+  return (
+    <div className="bb-chat">
+      <header className="bb-chatHead">
+        <span className="bb-chatName">{t('title')}</span>
+        <button
+          type="button"
+          className="bb-iconBtn"
+          onClick={onOpenSettings}
+          aria-label={t('openSettings')}
+          title={t('openSettings')}
+        >
+          <SettingsIcon />
+        </button>
+      </header>
+
+      <div className="bb-chatBody">
+        <div className="bb-chatEmpty">
+          <span className="bb-chatEmptyMark">
+            <BaibaoIcon size={34} />
           </span>
-          <div className="bb-headText">
-            <div className="bb-nameRow">
-              <h1 className="bb-title">{t('title')}</h1>
-              <span className="bb-stage">{t('stage')}</span>
-            </div>
-            <p className="bb-sub">{t('subtitle')}</p>
-          </div>
-        </header>
-
-        <div className="bb-tabs" role="tablist" aria-label={t('title')}>
-          {TABS.map((item) => {
-            const active = item.id === tab
-            return (
-              <button
-                key={item.id}
-                id={`bb-tab-${item.id}`}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-controls={`bb-panel-${item.id}`}
-                tabIndex={active ? 0 : -1}
-                className={active ? 'bb-tab bb-tabActive' : 'bb-tab'}
-                onClick={() => setTab(item.id)}
-                onKeyDown={(event) => onTabKeyDown(event, item.id)}
-              >
-                {t(item.label)}
-              </button>
-            )
-          })}
+          <h1 className="bb-chatEmptyTitle">{t('chatEmptyTitle')}</h1>
+          <p className="bb-chatEmptyHint">{t('chatEmptyHint')}</p>
         </div>
+      </div>
 
-        <main className="bb-body">
-          <ChatSection t={t} hidden={tab !== 'chat'} />
-          <MemorySection t={t} hidden={tab !== 'memory'} />
-          <ConnectionsSection t={t} hidden={tab !== 'connections'} />
-          <SettingsSection t={t} hidden={tab !== 'settings'} />
-        </main>
-
-        <footer className="bb-foot">
-          <span>{t('footer')}</span>
-          <span className="bb-local">{t('localOnly')}</span>
-        </footer>
+      <div className="bb-chatFoot">
+        <div className="bb-composer">
+          <input
+            className="bb-composerInput"
+            type="text"
+            placeholder={t('composerPlaceholder')}
+            aria-label={t('composerPlaceholder')}
+            disabled
+          />
+          <button type="button" className="bb-composerSend" disabled>
+            {t('send')}
+          </button>
+        </div>
+        <p className="bb-composerNote">{t('composerNote')}</p>
       </div>
     </div>
   )
 }
 
-function ChatSection({ t, hidden }: SectionProps) {
+function SettingsView({
+  t,
+  tab,
+  onTab,
+  onBack,
+}: BaibaoPanelProps & {
+  tab: SettingsTab
+  onTab: (tab: SettingsTab) => void
+  onBack: () => void
+}) {
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, current: SettingsTab): void => {
+    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    if (delta === 0) return
+    event.preventDefault()
+    const index = SETTINGS_TABS.findIndex((item) => item.id === current)
+    const next = SETTINGS_TABS[(index + delta + SETTINGS_TABS.length) % SETTINGS_TABS.length]
+    if (next === undefined) return
+    onTab(next.id)
+    document.getElementById(`bb-tab-${next.id}`)?.focus()
+  }
+
   return (
-    <section
-      id="bb-panel-chat"
-      role="tabpanel"
-      aria-labelledby="bb-tab-chat"
-      className="bb-section"
-      hidden={hidden}
-    >
-      <SectionHead title={t('chatTitle')} body={t('chatBody')} />
-      <div className="bb-grid">
-        <Card title={t('chatWorkspaceTitle')} body={t('chatWorkspaceBody')} badge={t('planned')} />
-        <Card title={t('chatThreadsTitle')} body={t('chatThreadsBody')} badge={t('planned')} />
-        <Card title={t('chatNativeTitle')} body={t('chatNativeBody')} badge={t('planned')} />
-      </div>
-      <div className="bb-composer">
-        <input
-          className="bb-composerInput"
-          type="text"
-          placeholder={t('composerPlaceholder')}
-          aria-label={t('composerPlaceholder')}
-          disabled
-        />
-        <button type="button" className="bb-composerSend" disabled>
-          {t('send')}
+    <div className="bb-settings">
+      <header className="bb-settingsHead">
+        <button
+          type="button"
+          className="bb-iconBtn"
+          onClick={onBack}
+          aria-label={t('backToChat')}
+          title={t('backToChat')}
+        >
+          <BackIcon />
         </button>
+        <h1 className="bb-settingsTitle">{t('settingsPanelTitle')}</h1>
+      </header>
+
+      <div className="bb-tabs" role="tablist" aria-label={t('settingsPanelTitle')}>
+        {SETTINGS_TABS.map((item) => {
+          const active = item.id === tab
+          return (
+            <button
+              key={item.id}
+              id={`bb-tab-${item.id}`}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-controls={`bb-panel-${item.id}`}
+              tabIndex={active ? 0 : -1}
+              className={active ? 'bb-tab bb-tabActive' : 'bb-tab'}
+              onClick={() => onTab(item.id)}
+              onKeyDown={(event) => onTabKeyDown(event, item.id)}
+            >
+              {t(item.label)}
+            </button>
+          )
+        })}
       </div>
-      <button type="button" className="bb-action" disabled>
-        {t('chatAction')}
-      </button>
-    </section>
+
+      <main className="bb-settingsBody">
+        <MemorySection t={t} hidden={tab !== 'memory'} />
+        <ConnectionsSection t={t} hidden={tab !== 'connections'} />
+        <SettingsSection t={t} hidden={tab !== 'settings'} />
+      </main>
+
+      <footer className="bb-foot">
+        <span>{t('footer')}</span>
+        <span className="bb-local">{t('localOnly')}</span>
+      </footer>
+    </div>
   )
 }
 
