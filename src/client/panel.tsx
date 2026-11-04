@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { BaibaoIcon } from './icon'
 import type { BaibaoKey } from './locales'
 import {
@@ -40,6 +40,39 @@ type SettingsTab = (typeof SETTINGS_TABS)[number]['id']
  */
 export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProps) {
   const [tab, setTab] = useState<SettingsTab>('memory')
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState(false)
+  const [compact, setCompact] = useState(false)
+  const pageRef = useRef<HTMLDivElement>(null)
+  const heroRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const root = pageRef.current
+    const hero = heroRef.current
+    if (root === null || hero === null || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry !== undefined) setCompact(!entry.isIntersecting)
+      },
+      { root, threshold: 0 },
+    )
+    observer.observe(hero)
+    return () => observer.disconnect()
+  }, [])
+
+  const start = async (): Promise<void> => {
+    if (onStartChat === undefined || starting) return
+    setStarting(true)
+    setStartError(false)
+    try {
+      await onStartChat()
+    } catch {
+      setStartError(true)
+    } finally {
+      setStarting(false)
+    }
+  }
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, current: SettingsTab): void => {
     const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
@@ -54,8 +87,24 @@ export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProp
 
   return (
     <div className="bb-root">
-      <div className="bb-page">
-        <Hero t={t} onStartChat={onStartChat} />
+      <div ref={pageRef} className="bb-page">
+        <Hero
+          t={t}
+          heroRef={heroRef}
+          onStartChat={onStartChat}
+          starting={starting}
+          startError={startError}
+          onStart={() => void start()}
+        />
+
+        {compact && (
+          <CompactHeader
+            t={t}
+            onStartChat={onStartChat}
+            starting={starting}
+            onStart={() => void start()}
+          />
+        )}
 
         <section className="bb-hub" aria-label={t('settingsPanelTitle')}>
           <div className="bb-tabs" role="tablist" aria-label={t('settingsPanelTitle')}>
@@ -100,51 +149,68 @@ export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProp
   )
 }
 
-function Hero({ t, onStartChat }: BaibaoPanelProps) {
-  const [starting, setStarting] = useState(false)
-  const [startError, setStartError] = useState(false)
+interface HeroProps {
+  t: BaibaoPanelProps['t']
+  onStartChat?: () => Promise<void>
+  starting: boolean
+  startError: boolean
+  onStart: () => void
+}
 
-  const start = async (): Promise<void> => {
-    if (onStartChat === undefined || starting) return
-    setStarting(true)
-    setStartError(false)
-    try {
-      await onStartChat()
-    } catch {
-      setStartError(true)
-    } finally {
-      setStarting(false)
-    }
-  }
+const Hero = ({
+  t,
+  onStartChat,
+  starting,
+  startError,
+  onStart,
+  heroRef,
+}: HeroProps & { heroRef: RefObject<HTMLElement> }) => (
+  <section ref={heroRef} className="bb-hero">
+    <span className="bb-heroMark">
+      <BaibaoIcon size={46} />
+    </span>
+    <div className="bb-heroCopy">
+      <h1 className="bb-heroTitle">{t('title')}</h1>
+      <p className="bb-heroBody">{t('heroBody')}</p>
+    </div>
+    <div className="bb-heroSide">
+      {onStartChat !== undefined ? (
+        <button
+          type="button"
+          className="bb-heroAction"
+          onClick={onStart}
+          disabled={starting}
+        >
+          {starting ? t('startChatOpening') : t('startChat')}
+        </button>
+      ) : null}
+      {startError && (
+        <p className="bb-heroError" role="alert">
+          {t('startChatFailed')}
+        </p>
+      )}
+    </div>
+  </section>
+)
 
+function CompactHeader({ t, onStartChat, starting, onStart }: Omit<HeroProps, 'startError'>) {
   return (
-    <section className="bb-hero">
-      <span className="bb-heroMark">
-        <BaibaoIcon size={46} />
+    <div className="bb-compactHead">
+      <span className="bb-compactMark">
+        <BaibaoIcon size={22} />
       </span>
-      <div className="bb-heroCopy">
-        <span className="bb-heroEyebrow">{t('heroEyebrow')}</span>
-        <h1 className="bb-heroTitle">{t('title')}</h1>
-        <p className="bb-heroBody">{t('heroBody')}</p>
-      </div>
-      <div className="bb-heroSide">
-        {onStartChat !== undefined ? (
-          <button
-            type="button"
-            className="bb-heroAction"
-            onClick={() => void start()}
-            disabled={starting}
-          >
-            {starting ? t('startChatOpening') : t('startChat')}
-          </button>
-        ) : null}
-        {startError && (
-          <p className="bb-heroError" role="alert">
-            {t('startChatFailed')}
-          </p>
-        )}
-      </div>
-    </section>
+      <span className="bb-compactMode">{t('agentModeTitle')}</span>
+      {onStartChat !== undefined ? (
+        <button
+          type="button"
+          className="bb-compactAction"
+          onClick={onStart}
+          disabled={starting}
+        >
+          {starting ? t('startChatOpening') : t('startChat')}
+        </button>
+      ) : null}
+    </div>
   )
 }
 
