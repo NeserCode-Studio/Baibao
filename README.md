@@ -89,6 +89,8 @@ DSH
 dsh plugin --profile desktop add Z:\Repo\Github\NCS\Baibao
 ```
 
+> 首次从源码安装前先执行 `npm install && npm run build`：本包的入口是 `lib/index.js` 与 `lib/client.js`，仓库里不提交 `lib/`。
+
 `dsh plugin add` 会读取本包的 `dsh.bundle.patch`，把 `dsh-baibao` 追加进
 `dsh.profile.bundles`，无需手改 profile 文件。想手动挂载时，在本 profile 的
 `cordis.patch.yml` 里加：
@@ -123,6 +125,34 @@ M0 的客户端只依赖 React 与 DSH 注入的模块；`build.mjs` 把源码�
 `window.__ModuleLoader__.load({ id, factory })` 形式，`lib/client.js` 由 web host 直接加载。
 
 当前工作区未安装 `node_modules`，因此 M0 没有执行 `npm run check`；开始 M1 前请允许安装依赖并跑一次完整构建。
+
+### 热更新（开发）
+
+当前 desktop profile 已经启用了 DSH 的客户端 bundle HMR（`include:client-hmr`，默认 500ms 轮询）。本包只需要持续重建 `lib/client.js`：
+
+```bash
+npm install
+npm run build        # 首次生成 lib/，再挂载
+dsh plugin --profile desktop add Z:\Repo\Github\NCS\Baibao
+npm run dev          # 监听 src/，持续重建 lib/client.js
+```
+
+第一次挂载前必须已经有 `lib/client.js` 和 `lib/index.js`；否则 profile 会在启动时找不到客户端 bundle。
+
+之后修改 `src/client/**`（组件、词典、CSS）：
+
+1. esbuild 重建 `lib/client.js`；
+2. DSH 的 client HMR 发现 bundle 变化，替换客户端模块；
+3. 正常情况下不需要刷新页面，约 0.5–1s 后生效。
+
+限制与排查：
+
+- 改 `src/index.js`（宿主侧）走 Host HMR，可能触发插件重启；若没有生效，刷新页面或重启应用。
+- 新增依赖、修改 `package.json` / `cordis.patch.yml`、改变插件注册结构，通常需要重新 `dsh plugin ... add` 或重启。
+- HMR 是模块级替换，组件局部 state 可能重置；不要在未保存的表单里测试。
+- 若 500ms 后没有反应：确认 `plugin_manager list_plugins` 里 `include:client-hmr` 是 `active`，并确认 profile 指向的是当前仓库（本地 link），而不是旧的 `Z:\dsh-baibao`。
+- 确认 profile 的 `node_modules/dsh-baibao` 是指向本仓库的链接（junction/symlink），而不是拷贝；拷贝安装时 HMR 看不到源码改动。
+- 没有 HMR 时的兜底：`npm run build` 后刷新页面。
 
 ### 约定
 

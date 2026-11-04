@@ -1,5 +1,5 @@
 /**
- * Build the browser half of dsh-baibao.
+ * Build the browser half of dsh-baibao, and optionally watch it.
  *
  * The client module system only accepts bundles that register themselves
  * through `window.__ModuleLoader__.load({ id, factory })`, where the factory
@@ -12,12 +12,22 @@
  * `react`, `react/jsx-runtime` and the ui-primitives package are externals: the
  * host's platform module table supplies them, and a bundled copy would break
  * hook identity against the shell's React instance.
+ *
+ * `--watch` keeps the process alive and rebuilds after `src/` changes. DSH's
+ * client HMR watches the emitted `lib/client.js` and swaps the module without a
+ * page refresh; unchanged output is not rewritten, so a no-op save cannot
+ * trigger a pointless reload.
  */
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
+import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { watch } from 'node:fs'
 import { build } from 'esbuild'
 
 const PACKAGE_NAME = 'dsh-baibao'
-const ENTRY = 'src/client/index.tsx'
+const CLIENT_ENTRY = 'src/client/index.tsx'
+const HOST_ENTRY = 'src/index.js'
+const CLIENT_OUT = 'lib/client.js'
+const HOST_OUT = 'lib/index.js'
+const WATCH = process.argv.includes('--watch')
 
 const EXTERNALS = [
   'react',
@@ -26,47 +36,114 @@ const EXTERNALS = [
   '@deepseek-ai/dsh-client-ui-primitives',
 ]
 
-const result = await build({
-  entryPoints: [ENTRY],
-  bundle: true,
-  write: false,
-  format: 'cjs',
-  platform: 'browser',
-  target: 'es2022',
-  jsx: 'automatic',
-  external: EXTERNALS,
-  loader: { '.css': 'text' },
-  legalComments: 'none',
-  sourcemap: false,
-  charset: 'utf8',
-  banner: {
-    js: [
-      `window.__ModuleLoader__.load({`,
-      `\tid: ${JSON.stringify(PACKAGE_NAME)},`,
-      `\tfactory: (require) => {`,
-      // The factory body is CJS: `module`/`exports` must exist before it runs,
-      // and the strict-mode directive has to open the function to take effect.
-      `\t\t"use strict";`,
-      `\t\tvar module = { exports: {} };`,
-      `\t\tvar exports = module.exports;`,
-    ].join('\n'),
-  },
-  footer: {
-    js: ['\t\treturn module.exports;', '\t}', '});', ''].join('\n'),
-  },
-})
+/**
+ * Write a generated file only when its bytes actually changed.
+ * @param {string} path - output path.
+ * @param {string} content - complete file content.
+ * @returns {Promise<boolean>} whether the file was rewritten.
+ */
+async function writeIfChanged(path, content) {
+  try {
+    const current = await readFile(path, 'utf8')
+    if (current === content) return false
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  await writeFile(path, content, 'utf8')
+  return true
+}
 
-const [clientBundle] = result.outputFiles
-if (clientBundle === undefined) throw new Error('esbuild produced no output for ' + ENTRY)
+/**
+ * Run one complete client + host build.
+ * @returns {Promise<boolean>} whether any output changed.
+ */
+async function buildOnce() {
+  const result = await build({
+    entryPoints: [CLIENT_ENTRY],
+    bundle: true,
+    write: false,
+    format: 'cjs',
+    platform: 'browser',
+    target: 'es2022',
+    jsx: 'automatic',
+    external: EXTERNALS,
+    loader: { '.css': 'text' },
+    legalComments: 'none',
+    sourcemap: false,
+    charset: 'utf8',
+    banner: {
+      js: [
+        `window.__ModuleLoader__.load({`,
+        `\tid: ${JSON.stringify(PACKAGE_NAME)},`,
+        `\tfactory: (require) => {`,
+        // The factory body is CJS: `module`/`exports` must exist before it runs,
+        // and the strict-mode directive has to open the function to take effect.
+        `\t\t"use strict";`,
+        `\t\tvar module = { exports: {} };`,
+        `\t\tvar exports = module.exports;`,
+      ].join('\n'),
+    },
+    footer: {
+      js: ['\t\treturn module.exports;', '\t}', '});', ''].join('\n'),
+    },
+  })
 
-// esbuild opens every CJS file with its own strict-mode directive; the banner
-// above already supplies one inside the factory, so drop the duplicate.
-const body = clientBundle.text.replace(/^"use strict";\r?\n/, '')
+  const [clientBundle] = result.outputFiles
+  if (clientBundle === undefined) throw new Error('esbuild produced no output for ' + CLIENT_ENTRY)
 
-await mkdir('lib', { recursive: true })
-await writeFile('lib/client.js', body, 'utf8')
-await copyFile('src/index.js', 'lib/index.js')
+  // esbuild opens every CJS file with its own strict-mode directive; the banner
+  // above already supplies one inside the factory, so drop the duplicate.
+  const body = clientBundle.text.replace(/^"use strict";\r?\n/, '')
 
-const bytes = Buffer.byteLength(body, 'utf8')
-console.log(`lib/client.js  ${(bytes / 1024).toFixed(1)} KiB`)
-console.log('lib/index.js   copied from src/index.js')
+  await mkdir('lib', { recursive: true })
+  const clientChanged = await writeIfChanged(CLIENT_OUT, body)
+  const hostSource = await readFile(HOST_ENTRY, 'utf8')
+  const hostChanged = await writeIfChanged(HOST_OUT, hostSource)
+
+  const bytes = Buffer.byteLength(body, 'utf8')
+  console.log(
+    `${CLIENT_OUT}  ${(bytes / 1024).toFixed(1)} KiB${clientChanged ? '' : '  (unchanged)'}`,
+  )
+  console.log(`${HOST_OUT}   ${hostChanged ? 'updated' : 'unchanged'}`)
+  return clientChanged || hostChanged
+}
+
+if (!WATCH) console.log('[baibao] building once')
+await buildOnce()
+
+if (WATCH) {
+  let timer
+  let building = false
+  let queued = false
+
+  const run = async () => {
+    if (building) {
+      queued = true
+      return
+    }
+    building = true
+    try {
+      await buildOnce()
+    } catch (error) {
+      console.error('[baibao] build failed:', error instanceof Error ? error.message : error)
+    } finally {
+      building = false
+    }
+    if (queued) {
+      queued = false
+      schedule()
+    }
+  }
+
+  const schedule = () => {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = setTimeout(() => void run(), 80)
+  }
+
+  const watcher = watch('src', { recursive: true }, schedule)
+  console.log('[baibao] watching src/ (Ctrl+C to stop)')
+  process.on('SIGINT', () => {
+    watcher.close()
+    process.exit(0)
+  })
+}
