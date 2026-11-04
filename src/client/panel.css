@@ -517,6 +517,130 @@
   color: var(--dsw-alias-state-error-primary, #d93f4c);
 }
 
+.bb-confirmMask {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--dsw-alias-button-elevated-fill, #ffffff);
+  border-radius: inherit;
+}
+
+.bb-confirm {
+  width: 100%;
+  max-width: 360px;
+  padding: 14px;
+  background: var(--dsw-alias-button-elevated-fill, #ffffff);
+  border: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
+  border-radius: var(--dsw-radius-md, 10px);
+  box-shadow: 0 8px 24px #0000001f;
+}
+
+.bb-confirmTitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+
+.bb-confirmPath {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary, #5c6570);
+  overflow-wrap: anywhere;
+}
+
+.bb-confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bb-storageDanger {
+  color: var(--dsw-alias-state-error-primary, #d93f4c);
+  border-color: var(--dsw-alias-state-error-primary, #d93f4c);
+}
+
+.bb-storageDangerLink {
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dsw-alias-state-error-primary, #d93f4c);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.bb-storageDangerLink:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bb-backups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
+}
+
+.bb-backupsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bb-backupsTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+
+.bb-backupList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bb-backupItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.bb-backupName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary, #5c6570);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bb-backupMeta {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary, #8b93a1);
+}
+
+.bb-backupActions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
 .bb-foot {
   flex: none;
   display: flex;

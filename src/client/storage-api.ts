@@ -16,11 +16,23 @@ export interface StorageMigration {
   to: string
   files: number
   backups: number
-  keptOld: boolean
+  oldDeleted: boolean
+  oldDeleteError?: string | null
+}
+
+export interface StorageBackup {
+  id: string
+  path: string
+  createdAt: string | null
+  files: number | null
 }
 
 export type StorageResult =
   | { ok: true; storage: StorageInfo; migration?: StorageMigration }
+  | { ok: false; error: string }
+
+export type BackupResult =
+  | { ok: true; backups: StorageBackup[]; backup?: StorageBackup }
   | { ok: false; error: string }
 
 const ROUTE = '/dsh-baibao/api/storage'
@@ -67,6 +79,58 @@ export async function setStorage(root: string): Promise<StorageResult> {
       body: JSON.stringify({ root }),
     })
     return await readResult(response)
+  } catch {
+    return { ok: false, error: 'network' }
+  }
+}
+
+const BACKUPS_ROUTE = '/dsh-baibao/api/storage/backups'
+
+async function readBackupResult(response: Response): Promise<BackupResult> {
+  try {
+    const body = (await response.json()) as {
+      ok?: boolean
+      backups?: StorageBackup[]
+      backup?: StorageBackup
+      error?: string
+    }
+    if (body.ok === true && Array.isArray(body.backups)) {
+      return { ok: true, backups: body.backups, backup: body.backup }
+    }
+    return { ok: false, error: body.error ?? `http-${response.status}` }
+  } catch {
+    return { ok: false, error: `http-${response.status}` }
+  }
+}
+
+export async function listBackups(): Promise<BackupResult> {
+  try {
+    const response = await fetch(apiPath(BACKUPS_ROUTE), { cache: 'no-store' })
+    return await readBackupResult(response)
+  } catch {
+    return { ok: false, error: 'network' }
+  }
+}
+
+export async function createBackup(): Promise<BackupResult> {
+  try {
+    const response = await fetch(apiPath(BACKUPS_ROUTE), {
+      method: 'POST',
+      cache: 'no-store',
+    })
+    return await readBackupResult(response)
+  } catch {
+    return { ok: false, error: 'network' }
+  }
+}
+
+export async function deleteBackup(id: string): Promise<BackupResult> {
+  try {
+    const response = await fetch(apiPath(`${BACKUPS_ROUTE}?id=${encodeURIComponent(id)}`), {
+      method: 'DELETE',
+      cache: 'no-store',
+    })
+    return await readBackupResult(response)
   } catch {
     return { ok: false, error: 'network' }
   }

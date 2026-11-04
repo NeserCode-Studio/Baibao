@@ -1,7 +1,16 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { BackIcon, BaibaoIcon, SettingsIcon } from './icon'
 import type { BaibaoKey } from './locales'
-import { getStorage, setStorage, type StorageInfo, type StorageMigration } from './storage-api'
+import {
+  createBackup,
+  deleteBackup,
+  getStorage,
+  listBackups,
+  setStorage,
+  type StorageBackup,
+  type StorageInfo,
+  type StorageMigration,
+} from './storage-api'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
 export type TranslateBaibao = (key: BaibaoKey, params?: Record<string, unknown>) => string
@@ -233,29 +242,37 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
   const [migration, setMigration] = useState<StorageMigration | null>(null)
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading')
+  const [backups, setBackups] = useState<StorageBackup[]>([])
+  const [pendingRoot, setPendingRoot] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupError, setBackupError] = useState(false)
 
   useEffect(() => {
     let live = true
-    void getStorage().then((result) => {
+    void Promise.all([getStorage(), listBackups()]).then(([storage, list]) => {
       if (!live) return
-      if (result.ok) {
-        setInfo(result.storage)
-        setDraft(result.storage.root)
+      if (storage.ok) {
+        setInfo(storage.storage)
+        setDraft(storage.storage.root)
         setStatus('ready')
       } else {
         setStatus('error')
       }
+      if (list.ok) setBackups(list.backups)
     })
     return () => {
       live = false
     }
   }, [])
 
-  const save = async (value: string): Promise<void> => {
+  const applySave = async (value: string): Promise<void> => {
     const root = value.trim()
     if (root === '') return
+    setPendingRoot(null)
     setStatus('saving')
     setMigration(null)
+    setBackupError(false)
     const result = await setStorage(root)
     if (result.ok) {
       setInfo(result.storage)
@@ -265,6 +282,16 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
     } else {
       setStatus('error')
     }
+  }
+
+  const requestSave = (value: string): void => {
+    const root = value.trim()
+    if (root === '') return
+    if (info !== null && root !== info.root) {
+      setPendingRoot(root)
+      return
+    }
+    void applySave(root)
   }
 
   const pick = async (): Promise<void> => {
@@ -281,14 +308,73 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
     }
   }
 
+  const addBackup = async (): Promise<void> => {
+    setBackupBusy(true)
+    setBackupError(false)
+    const result = await createBackup()
+    if (result.ok) setBackups(result.backups)
+    else setBackupError(true)
+    setBackupBusy(false)
+  }
+
+  const removeBackup = async (id: string): Promise<void> => {
+    setBackupBusy(true)
+    setBackupError(false)
+    const result = await deleteBackup(id)
+    if (result.ok) {
+      setBackups(result.backups)
+      setPendingDelete(null)
+    } else {
+      setBackupError(true)
+    }
+    setBackupBusy(false)
+  }
+
+  const busy = status === 'saving' || backupBusy
+
   return (
-    <div className="bb-storage" aria-busy={status === 'saving'}>
+    <div className="bb-storage" aria-busy={busy}>
       {status === 'saving' && (
         <div className="bb-storageMask" role="status" aria-live="polite">
           <span className="bb-spinner" aria-hidden="true" />
           {t('storageMigrating')}
         </div>
       )}
+
+      {pendingRoot !== null && (
+        <div
+          className="bb-confirmMask"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bb-migrate-confirm"
+        >
+          <div className="bb-confirm">
+            <p id="bb-migrate-confirm" className="bb-confirmTitle">
+              {t('storageMigrateConfirm')}
+            </p>
+            <p className="bb-confirmPath">{pendingRoot}</p>
+            <div className="bb-confirmActions">
+              <button
+                type="button"
+                className="bb-storageLink"
+                onClick={() => setPendingRoot(null)}
+              >
+                {t('storageCancel')}
+              </button>
+              <button
+                type="button"
+                className="bb-storageBtn bb-storageDanger"
+                onClick={() => {
+                  if (pendingRoot !== null) void applySave(pendingRoot)
+                }}
+              >
+                {t('storageMigrateContinue')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <label className="bb-storageLabel" htmlFor="bb-storage-path">
         {t('storagePath')}
       </label>
@@ -298,7 +384,7 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
           type="button"
           className="bb-storagePath"
           onClick={() => void pick()}
-          disabled={status === 'saving' || onPickDirectory === undefined}
+          disabled={busy || onPickDirectory === undefined}
           title={draft !== '' ? draft : t('storagePathPlaceholder')}
           aria-label={t('storagePath')}
         >
@@ -308,8 +394,8 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
         <button
           type="button"
           className="bb-storageBtn"
-          onClick={() => void save(draft)}
-          disabled={status === 'saving' || draft.trim() === ''}
+          onClick={() => requestSave(draft)}
+          disabled={busy || draft.trim() === ''}
         >
           {t('storageSave')}
         </button>
@@ -319,13 +405,14 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
           type="button"
           className="bb-storageLink"
           onClick={() => {
-            if (info !== null) void save(info.defaultRoot)
+            if (info !== null) requestSave(info.defaultRoot)
           }}
-          disabled={info === null || status === 'saving'}
+          disabled={info === null || busy}
         >
           {t('storageReset')}
         </button>
       </div>
+
       {info !== null && (
         <dl className="bb-storageMeta">
           <div>
@@ -342,6 +429,7 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
           </div>
         </dl>
       )}
+
       {status === 'saved' && migration !== null && migration.files > 0 && (
         <p className="bb-storageOk" role="status">
           {t('storageMigrated', { files: migration.files, backups: migration.backups })}
@@ -352,14 +440,84 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
           {t('storageSaved')}
         </p>
       )}
-      {status === 'saved' && migration !== null && migration.keptOld && (
-        <p className="bb-storageHint">{t('storageBackupKept')}</p>
+      {status === 'saved' && migration !== null && migration.oldDeleted && (
+        <p className="bb-storageHint">{t('storageOldDeleted')}</p>
+      )}
+      {status === 'saved' && migration !== null && !migration.oldDeleted && (
+        <p className="bb-storageError" role="alert">
+          {t('storageOldDeleteFailed')}
+        </p>
       )}
       {status === 'error' && (
         <p className="bb-storageError" role="alert">
           {t('storageFailed')}
         </p>
       )}
+
+      <div className="bb-backups">
+        <div className="bb-backupsHead">
+          <span className="bb-backupsTitle">{t('storageBackups')}</span>
+          <button
+            type="button"
+            className="bb-storageBtn"
+            onClick={() => void addBackup()}
+            disabled={busy}
+          >
+            {t('storageBackupCreate')}
+          </button>
+        </div>
+        {backups.length === 0 ? (
+          <p className="bb-storageHint">{t('storageBackupEmpty')}</p>
+        ) : (
+          <ul className="bb-backupList">
+            {backups.map((backup) => (
+              <li key={backup.id} className="bb-backupItem">
+                <span className="bb-backupName" title={backup.path}>
+                  {backup.createdAt ?? backup.id}
+                </span>
+                <span className="bb-backupMeta">
+                  {backup.files !== null ? t('storageBackupFiles', { n: backup.files }) : ''}
+                </span>
+                {pendingDelete === backup.id ? (
+                  <span className="bb-backupActions">
+                    <button
+                      type="button"
+                      className="bb-storageDangerLink"
+                      onClick={() => void removeBackup(backup.id)}
+                      disabled={backupBusy}
+                    >
+                      {t('storageDeleteConfirm')}
+                    </button>
+                    <button
+                      type="button"
+                      className="bb-storageLink"
+                      onClick={() => setPendingDelete(null)}
+                      disabled={backupBusy}
+                    >
+                      {t('storageCancel')}
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="bb-storageLink"
+                    onClick={() => setPendingDelete(backup.id)}
+                    disabled={busy}
+                  >
+                    {t('storageDelete')}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="bb-storageHint">{t('storageBackupHint')}</p>
+        {backupError && (
+          <p className="bb-storageError" role="alert">
+            {t('storageBackupFailed')}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
