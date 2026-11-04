@@ -82,12 +82,11 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  color: #ffffff;
-  background: var(--dsw-alias-brand-primary, #4f6ef7);
+  color: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-label-primary);
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  box-shadow: 0 6px 16px #4f6ef733;
   transition: filter 0.16s ease, transform 0.16s ease;
 }
 
@@ -174,8 +173,8 @@
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  color: #ffffff;
-  background: var(--dsw-alias-brand-primary, #4f6ef7);
+  color: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-label-primary);
   border: none;
   border-radius: 999px;
   cursor: pointer;
@@ -317,7 +316,7 @@
   padding: 0 6px;
   font-size: 10px;
   line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 999px;
 }
@@ -377,7 +376,7 @@
 .bb-jungValue {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-jungRange {
@@ -387,7 +386,7 @@
 
 .bb-jungPoles {
   font-size: 11px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-personaActions {
@@ -403,8 +402,8 @@
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  color: #ffffff;
-  background: var(--dsw-alias-brand-primary, #4f6ef7);
+  color: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-label-primary);
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -522,7 +521,7 @@
 
 .bb-memoryDate {
   font-size: 11px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-memoryText {
@@ -541,7 +540,7 @@
 
 .bb-memoryTag {
   font-size: 11px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-memoryActions {
@@ -598,7 +597,7 @@
   margin: 2px 0 0;
   font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-storageLabel {
@@ -716,7 +715,7 @@
   margin: 4px 0 0;
   font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-storageMeta div {
@@ -867,7 +866,7 @@
 
 .bb-backupMeta {
   flex: none;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .bb-backupActions {
@@ -888,7 +887,7 @@
   padding: 10px 0 0;
   font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #8b93a1);
+  color: var(--dsw-alias-label-secondary);
   border-top: 0.5px solid var(--dsw-alias-border-l1);
 }
 
