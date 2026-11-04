@@ -32,7 +32,6 @@
   align-items: center;
   height: 48px;
   padding: 0 16px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
 }
 
 .bb-chatHead {
@@ -187,7 +186,6 @@
   padding: 0 16px;
   overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
 }
 
 .bb-tab {
@@ -218,12 +216,12 @@
 .bb-tabActive::after {
   position: absolute;
   right: 10px;
-  bottom: -0.5px;
+  bottom: 0;
   left: 10px;
   height: 2px;
   content: '';
   background: var(--dsw-alias-brand-primary, #4f6ef7);
-  border-radius: 2px 2px 0 0;
+  border-radius: 2px;
 }
 
 .bb-settingsBody {
