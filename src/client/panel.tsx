@@ -97,14 +97,13 @@ export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProp
           onStart={() => void start()}
         />
 
-        {compact && (
-          <CompactHeader
-            t={t}
-            onStartChat={onStartChat}
-            starting={starting}
-            onStart={() => void start()}
-          />
-        )}
+        <CompactHeader
+          t={t}
+          open={compact}
+          onStartChat={onStartChat}
+          starting={starting}
+          onStart={() => void start()}
+        />
 
         <section className="bb-hub" aria-label={t('settingsPanelTitle')}>
           <div className="bb-tabs" role="tablist" aria-label={t('settingsPanelTitle')}>
@@ -193,9 +192,18 @@ const Hero = ({
   </section>
 )
 
-function CompactHeader({ t, onStartChat, starting, onStart }: Omit<HeroProps, 'startError'>) {
+function CompactHeader({
+  t,
+  open,
+  onStartChat,
+  starting,
+  onStart,
+}: Omit<HeroProps, 'startError'> & { open: boolean }) {
   return (
-    <div className="bb-compactHead">
+    <div
+      className={open ? 'bb-compactHead bb-compactHeadOpen' : 'bb-compactHead'}
+      aria-hidden={!open}
+    >
       <span className="bb-compactMark">
         <BaibaoIcon size={22} />
       </span>
@@ -206,6 +214,7 @@ function CompactHeader({ t, onStartChat, starting, onStart }: Omit<HeroProps, 's
           className="bb-compactAction"
           onClick={onStart}
           disabled={starting}
+          tabIndex={open ? 0 : -1}
         >
           {starting ? t('startChatOpening') : t('startChat')}
         </button>
