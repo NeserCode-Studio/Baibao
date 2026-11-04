@@ -417,6 +417,11 @@ async function saveMemory(input) {
   return withMemoryLock(async () => {
     const data = await readMemoryData()
     const normalized = normalizeMemoryInput(input)
+    const fingerprint = normalizeMemoryText(normalized.text)
+    const existing = data.entries.find(
+      (entry) => normalizeMemoryText(entry.text) === fingerprint,
+    )
+    if (existing !== undefined) return existing
     const now = new Date().toISOString()
     const entry = {
       id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -533,6 +538,58 @@ function memoryTools() {
   ]
 }
 
+function normalizeMemoryText(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[\s，。！？!?；;：:、,.()（）\[\]{}]/g, '')
+}
+
+function messageText(message) {
+  if (typeof message?.text === 'string') return message.text
+  if (!Array.isArray(message?.content)) return ''
+  return message.content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join(' ')
+}
+
+function extractMemoryCandidate(text) {
+  const cleaned = String(text ?? '').replace(/\s+/g, ' ').trim()
+  if (cleaned === '') return null
+  const explicit = cleaned.match(
+    /(?:记住|记一下|记下来|记下)[：:，,\s]*([^。！？!?\n]{4,160})/,
+  )
+  const preference = cleaned.match(
+    /(我(?:喜欢|偏好|讨厌|不喜欢|希望|想要|习惯|总是|通常)[^。！？!?\n]{2,160})/,
+  )
+  const boundary = cleaned.match(/((?:不要|别)[^。！？!?\n]{2,160})/)
+  const raw = (explicit?.[1] ?? preference?.[1] ?? boundary?.[1])?.trim()
+  if (raw === undefined || raw.length < 4) return null
+  const value = raw.replace(/[。！？!?]+$/, '').trim()
+  const kind = /喜欢|偏好|讨厌|不喜欢|希望|想要|习惯|不要|别/.test(value)
+    ? 'preference'
+    : 'fact'
+  return { text: value, kind, tags: ['auto'] }
+}
+
+const lastConsolidatedTurns = new Map()
+
+async function consolidateAgent(ctx, agent) {
+  const query = ctx.get('sessionQuery')
+  if (query === undefined || baibaoWorkspacePath === null) return
+  const cwd = agent.session?.header?.cwd
+  if (typeof cwd !== 'string' || normalizePath(cwd) !== normalizePath(baibaoWorkspacePath)) {
+    return
+  }
+  const surface = await query.readSurface(agent.id)
+  const users = surface.events.filter((event) => event.type === 'user/message')
+  const latest = users[users.length - 1]
+  if (latest === undefined) return
+  const candidate = extractMemoryCandidate(messageText(latest.data))
+  if (candidate === null) return
+  await saveMemory(candidate)
+}
+
 function renderMemoryContext(entries) {
   const lines = entries.slice(0, 12).map((entry) => {
     const text = String(entry.text ?? '').replace(/\s+/g, ' ').trim()
@@ -613,16 +670,27 @@ export function apply(ctx) {
             // A resumed agent may already own these tools in this scope.
           }
           const entries = await listMemory()
-          if (entries.length === 0) return
-          try {
-            agent.ctx.systemPrompt.section({
-              name: 'baibao-memory-context',
-              order: 60,
-              text: renderMemoryContext(entries),
-            })
-          } catch {
-            // A resumed agent may already own the section in this scope.
+          if (entries.length > 0) {
+            try {
+              agent.ctx.systemPrompt.section({
+                name: 'baibao-memory-context',
+                order: 60,
+                text: renderMemoryContext(entries),
+              })
+            } catch {
+              // A resumed agent may already own the section in this scope.
+            }
           }
+          agent.ctx.effect(
+            () =>
+              agent.ctx.on('agent/turn-stopping', (payload) => {
+                const previous = lastConsolidatedTurns.get(agent.id)
+                if (previous === payload.turn) return
+                lastConsolidatedTurns.set(agent.id, payload.turn)
+                void consolidateAgent(ctx, agent).catch(() => {})
+              }),
+            'dsh-baibao: turn consolidation',
+          )
         })().catch(() => {})
       }),
     'dsh-baibao: persona section',
