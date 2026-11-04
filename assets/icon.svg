@@ -2,26 +2,36 @@
   <title>Baibao</title>
   <defs>
     <linearGradient id="bb-tile" x1="3" y1="2" x2="29" y2="30" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#111A2E" />
-      <stop offset="1" stop-color="#080D18" />
+      <stop stop-color="#0C1630" />
+      <stop offset="1" stop-color="#070B16" />
     </linearGradient>
-    <linearGradient id="bb-spark" x1="16" y1="2.4" x2="16" y2="10.2" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFE7A8" />
-      <stop offset="0.55" stop-color="#FFC46B" />
+    <linearGradient id="bb-whale" x1="3" y1="5" x2="13" y2="12" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5B7CFF" />
+      <stop offset="0.6" stop-color="#4D6BFE" />
       <stop offset="1" stop-color="#7DD3FC" />
     </linearGradient>
+    <linearGradient id="bb-spark" x1="6.4" y1="1.1" x2="6.4" y2="4.7" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF1BF" />
+      <stop offset="0.6" stop-color="#FFC46B" />
+      <stop offset="1" stop-color="#FFFFFF" />
+    </linearGradient>
     <radialGradient id="bb-glow" cx="0.5" cy="0.5" r="0.5">
-      <stop stop-color="#FFD27A" stop-opacity="0.32" />
+      <stop stop-color="#FFD27A" stop-opacity="0.3" />
       <stop offset="1" stop-color="#FFD27A" stop-opacity="0" />
     </radialGradient>
   </defs>
   <rect x="1" y="1" width="30" height="30" rx="8" fill="url(#bb-tile)" />
   <rect x="1" y="1" width="30" height="30" rx="8" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" />
-  <circle cx="16" cy="17" r="11" fill="url(#bb-glow)" />
-  <rect x="8.4" y="10" width="15.2" height="12.4" rx="4" fill="none" stroke="#D7E3FF" stroke-width="2" />
-  <circle cx="12.8" cy="16.2" r="1.7" fill="#7DD3FC" />
-  <circle cx="19.2" cy="16.2" r="1.7" fill="#7DD3FC" />
-  <path d="M12.8 19.4h6.4" stroke="#D7E3FF" stroke-width="1.8" stroke-linecap="round" />
-  <path d="M16 10V7.6" stroke="#D7E3FF" stroke-width="2" stroke-linecap="round" />
-  <path d="M16 2.4c.55 2.1 1.8 3.35 3.9 3.9-2.1.55-3.35 1.8-3.9 3.9-.55-2.1-1.8-3.35-3.9-3.9 2.1-.55 3.35-1.8 3.9-3.9Z" fill="url(#bb-spark)" />
+  <circle cx="12.8" cy="5.8" r="7" fill="url(#bb-glow)" />
+  <g transform="scale(2)">
+    <path
+      fill-rule="evenodd"
+      d="M2.4 8.4c0-2.2 2.2-3.9 4.9-3.9 1.6 0 3 .6 4 1.7l2.6-1.8-.5 2.4 1.5.9-2.5 1.1c-.8 2.2-2.9 3.6-5.3 3.6-2.9 0-5.2-1.8-5.2-4Zm3.1-1.1a.72.72 0 1 0 0 1.44.72.72 0 0 0 0-1.44Z"
+      fill="url(#bb-whale)"
+    />
+    <path
+      d="M6.4 1.1c.2.95.85 1.6 1.8 1.8-.95.2-1.6.85-1.8 1.8-.2-.95-.85-1.6-1.8-1.8.95-.2 1.6-.85 1.8-1.8Z"
+      fill="url(#bb-spark)"
+    />
+  </g>
 </svg>

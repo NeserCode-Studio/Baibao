@@ -1,9 +1,9 @@
 /**
- * The 百宝 brand glyph: a small robot head with a spark antenna.
+ * The 百宝 brand glyph: a whale with a four-point spark for a spout.
  *
- * The head and eyes carry the AI reading at 16px; the spark on the antenna is
- * the light. It is intentionally geometric rather than cartoonish so it still
- * looks at home in the DSH sidebar.
+ * The whale is the DeepSeek motif; the spark is the light. The eye is a
+ * negative-space hole so the silhouette survives at 16px without a second
+ * colour.
  *
  * Colour comes from `currentColor` alone — the sidebar paints panel icons with
  * the row's own colour, and the shell switches that colour between themes and
@@ -29,21 +29,13 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <rect
-        x="3.4"
-        y="5.4"
-        width="9.2"
-        height="7.6"
-        rx="2.4"
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      <circle cx="6.2" cy="9" r="1.05" fill="currentColor" />
-      <circle cx="9.8" cy="9" r="1.05" fill="currentColor" />
-      <path d="M6.4 11.1h3.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-      <path d="M8 5.4V3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
       <path
-        d="M8 1.1c.18.75.65 1.22 1.4 1.4-.75.18-1.22.65-1.4 1.4-.18-.75-.65-1.22-1.4-1.4.75-.18 1.22-.65 1.4-1.4Z"
+        fillRule="evenodd"
+        d="M2.4 8.4c0-2.2 2.2-3.9 4.9-3.9 1.6 0 3 .6 4 1.7l2.6-1.8-.5 2.4 1.5.9-2.5 1.1c-.8 2.2-2.9 3.6-5.3 3.6-2.9 0-5.2-1.8-5.2-4Zm3.1-1.1a.72.72 0 1 0 0 1.44.72.72 0 0 0 0-1.44Z"
+        fill="currentColor"
+      />
+      <path
+        d="M6.4 1.1c.2.95.85 1.6 1.8 1.8-.95.2-1.6.85-1.8 1.8-.2-.95-.85-1.6-1.8-1.8.95-.2 1.6-.85 1.8-1.8Z"
         fill="currentColor"
       />
     </svg>
