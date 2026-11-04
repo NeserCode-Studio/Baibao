@@ -82,7 +82,9 @@ export const zh = {
   settingsLocalBody: '记忆和人格默认只保存在这台机器；可导出、可清空。',
   settingsMirrorTitle: '可镜像到设置中心',
   settingsMirrorBody: '适合表单的选项可以同步到 DSH 设置中心，但只有一份数据。',
-  footer: 'M0 · 方向重置 · 当前只保留插件骨架',
+  heroEyebrow: '独立 Agent',
+  heroBody: '有自己的性格、记忆和主动连接。想聊天时，直接开始。',
+  footer: 'M3 · 记忆 v1',
   localOnly: '数据默认只留在这台机器。',
   planned: '规划中',
 } as const
@@ -170,7 +172,9 @@ export const en: Record<BaibaoKey, string> = {
   settingsMirrorTitle: 'Mirrorable to Settings',
   settingsMirrorBody:
     'Form-friendly options can appear in DSH Settings, backed by the same single source of truth.',
-  footer: 'M0 · direction reset · scaffold only',
+  heroEyebrow: 'Independent agent',
+  heroBody: 'Its own character, memory, and quiet reach-out. Start when you want to talk.',
+  footer: 'M3 · memory v1',
   localOnly: 'Data stays on this machine by default.',
   planned: 'Planned',
 }
