@@ -14,6 +14,7 @@ import {
 import { deleteMemory, listMemory, type MemoryEntry } from './memory-api'
 import {
   DEFAULT_JUNG,
+  DEFAULT_JUNG_TEXT,
   getPersona,
   savePersona,
   type JungAxis,
@@ -344,6 +345,9 @@ function JungChart({ persona, label }: { persona: JungPersona; label: string }) 
 
 function PersonaSection({ t, hidden }: SectionProps) {
   const [persona, setPersona] = useState<JungPersona>({ ...DEFAULT_JUNG })
+  const [baseText, setBaseText] = useState(DEFAULT_JUNG_TEXT)
+  const [defaultText, setDefaultText] = useState(DEFAULT_JUNG_TEXT)
+  const [limit, setLimit] = useState(600)
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>(
     'loading',
   )
@@ -354,6 +358,9 @@ function PersonaSection({ t, hidden }: SectionProps) {
       if (!live) return
       if (result.ok) {
         setPersona(result.persona)
+        setBaseText(result.text)
+        setDefaultText(result.defaultText)
+        setLimit(result.limit)
         setStatus('ready')
       } else {
         setStatus('error')
@@ -369,11 +376,14 @@ function PersonaSection({ t, hidden }: SectionProps) {
     setStatus('ready')
   }
 
-  const save = async (): Promise<void> => {
+  const save = async (text?: string): Promise<void> => {
     setStatus('saving')
-    const result = await savePersona(persona)
+    const result = await savePersona(persona, text)
     if (result.ok) {
       setPersona(result.persona)
+      setBaseText(result.text)
+      setDefaultText(result.defaultText)
+      setLimit(result.limit)
       setStatus('saved')
     } else {
       setStatus('error')
@@ -425,7 +435,7 @@ function PersonaSection({ t, hidden }: SectionProps) {
             </button>
             <button
               type="button"
-              className="bb-storageLink"
+              className="bb-secondaryBtn"
               onClick={() => {
                 setPersona({ ...DEFAULT_JUNG })
                 setStatus('ready')
@@ -447,6 +457,46 @@ function PersonaSection({ t, hidden }: SectionProps) {
           )}
           <p className="bb-storageHint">{t('personaNewSession')}</p>
         </div>
+      </div>
+
+      <div className="bb-promptBlock">
+        <div className="bb-jungRowTop">
+          <span className="bb-jungBlockTitle">{t('promptTitle')}</span>
+          <span className="bb-jungValue">
+            {baseText.length}/{limit}
+          </span>
+        </div>
+        <textarea
+          id="bb-persona-text"
+          className="bb-personaText"
+          value={baseText}
+          maxLength={limit}
+          rows={8}
+          spellCheck={false}
+          onChange={(event) => {
+            setBaseText(event.target.value)
+            setStatus('ready')
+          }}
+        />
+        <div className="bb-personaActions">
+          <button
+            type="button"
+            className="bb-personaBtn"
+            onClick={() => void save(baseText)}
+            disabled={status === 'saving'}
+          >
+            {t('promptSave')}
+          </button>
+          <button
+            type="button"
+            className="bb-secondaryBtn"
+            onClick={() => void save(defaultText)}
+            disabled={status === 'saving'}
+          >
+            {t('promptReset')}
+          </button>
+        </div>
+        <p className="bb-storageHint">{t('promptBody')}</p>
       </div>
     </section>
   )
