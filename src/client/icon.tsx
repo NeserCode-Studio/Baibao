@@ -45,10 +45,10 @@ const WHALE_BODY =
   + '13.4906 18.6764 12.1996 18.6949 11.3165 17.9964V17.9954Z'
 
 const EYE_STAR =
-  'M13.4 8.8c.25 1.05 1.05 1.85 2.1 2.1-1.05.25-1.85 1.05-2.1 2.1-.25-1.05-1.05-1.85-2.1-2.1 1.05-.25 1.85-1.05 2.1-2.1Z'
+  'M12.7 9.7c.25 1.0 1.0 1.75 2.0 2.0-1.0.25-1.75 1.0-2.0 2.0-.25-1.0-1.0-1.75-2.0-2.0 1.0-.25 1.75-1.0 2.0-2.0Z'
 
 const TAIL_STAR =
-  'M20.2 3.0c.4 1.9 1.9 3.4 3.8 3.8-1.9.4-3.4 1.9-3.8 3.8-.4-1.9-1.9-3.4-3.8-3.8 1.9-.4 3.4-1.9 3.8-3.8Z'
+  'M18.8 9.8C17.8 9.2 16.9 8.2 16.4 7.0C17.5 6.4 19.0 4.4 20.2 3.0C20.6 4.9 22.5 6.5 24.0 7.0C22.5 7.5 20.6 9.0 20.2 11.0C19.6 10.3 19.1 9.8 18.8 9.8Z'
 
 export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
   const maskId = `bb-${useId().replace(/:/g, '')}`
@@ -65,7 +65,7 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       <defs>
         <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
           <rect width="24" height="24" fill="white" />
-          <rect x="15" y="3" width="9" height="5" fill="black" />
+          <rect x="15" y="2.8" width="9" height="5.4" fill="black" />
           <path d={EYE_STAR} fill="black" />
         </mask>
       </defs>
