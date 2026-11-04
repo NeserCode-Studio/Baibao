@@ -20,6 +20,8 @@ export interface BaibaoPanelProps {
   t: TranslateBaibao
   /** Opens the host's native directory picker. */
   onPickDirectory?: () => Promise<string | null>
+  /** Creates a Baibao workspace session and opens it in the native chat. */
+  onStartChat?: () => Promise<void>
 }
 
 type SectionProps = BaibaoPanelProps & { hidden: boolean }
@@ -41,14 +43,18 @@ type SettingsTab = (typeof SETTINGS_TABS)[number]['id']
  * disabled until M2 wires the native DSH session. The settings view is the
  * single home for everything that is not conversation.
  */
-export function BaibaoPanel({ t, onPickDirectory }: BaibaoPanelProps) {
+export function BaibaoPanel({ t, onPickDirectory, onStartChat }: BaibaoPanelProps) {
   const [view, setView] = useState<View>('chat')
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('memory')
 
   return (
     <div className="bb-root">
       {view === 'chat' ? (
-        <ChatView t={t} onOpenSettings={() => setView('settings')} />
+        <ChatView
+          t={t}
+          onOpenSettings={() => setView('settings')}
+          onStartChat={onStartChat}
+        />
       ) : (
         <SettingsView
           t={t}
@@ -62,7 +68,27 @@ export function BaibaoPanel({ t, onPickDirectory }: BaibaoPanelProps) {
   )
 }
 
-function ChatView({ t, onOpenSettings }: BaibaoPanelProps & { onOpenSettings: () => void }) {
+function ChatView({
+  t,
+  onOpenSettings,
+  onStartChat,
+}: BaibaoPanelProps & { onOpenSettings: () => void }) {
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState(false)
+
+  const start = async (): Promise<void> => {
+    if (onStartChat === undefined || starting) return
+    setStarting(true)
+    setStartError(false)
+    try {
+      await onStartChat()
+    } catch {
+      setStartError(true)
+    } finally {
+      setStarting(false)
+    }
+  }
+
   return (
     <div className="bb-chat">
       <header className="bb-chatHead">
@@ -85,6 +111,21 @@ function ChatView({ t, onOpenSettings }: BaibaoPanelProps & { onOpenSettings: ()
           </span>
           <h1 className="bb-chatEmptyTitle">{t('chatEmptyTitle')}</h1>
           <p className="bb-chatEmptyHint">{t('chatEmptyHint')}</p>
+          {onStartChat !== undefined && (
+            <button
+              type="button"
+              className="bb-chatAction"
+              onClick={() => void start()}
+              disabled={starting}
+            >
+              {starting ? t('startChatOpening') : t('startChat')}
+            </button>
+          )}
+          {startError && (
+            <p className="bb-chatError" role="alert">
+              {t('startChatFailed')}
+            </p>
+          )}
         </div>
       </div>
 

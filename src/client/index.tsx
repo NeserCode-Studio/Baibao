@@ -20,14 +20,15 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { BaibaoIcon } from './icon'
+import { startBaibaoChat } from './chat-api'
 import { en, zh } from './locales'
 import panelCss from './panel.css'
 import { BaibaoPanel, type TranslateBaibao } from './panel'
 
 export const name = 'dsh-baibao'
 
-/** Client services this plugin reads: the slot registry and the locale runtime. */
-export const inject = ['slots', 'locale']
+/** Client services this plugin reads: slots, locale, and panel navigation. */
+export const inject = ['slots', 'locale', 'layout']
 
 /** Locale namespace and the panel id are the same string: one identity, one row. */
 const NS = 'dsh-baibao'
@@ -71,8 +72,24 @@ export function apply(ctx: Context): void {
       : null
   }
 
+  const openChat = async (): Promise<void> => {
+    const result = await startBaibaoChat()
+    if (result.ok !== true || typeof result.sessionId !== 'string') {
+      throw new Error(result.error ?? 'start-failed')
+    }
+    const uiWorkspace = ctx.get('uiWorkspace') as
+      | { openSession?: (target: { kind: 'session'; sessionId: string }) => void }
+      | undefined
+    uiWorkspace?.openSession?.({ kind: 'session', sessionId: result.sessionId })
+    ctx.layout.selectPanel('conversation' as MainPanelId)
+  }
+
   const BaibaoPanelSeat = ({ t: translate }: { t: TranslateBaibao }) => (
-    <BaibaoPanel t={translate} onPickDirectory={pickDirectory} />
+    <BaibaoPanel
+      t={translate}
+      onPickDirectory={pickDirectory}
+      onStartChat={openChat}
+    />
   )
 
   ctx.effect(

@@ -122,6 +122,41 @@
   color: var(--dsw-alias-label-secondary, #5c6570);
 }
 
+.bb-chatAction {
+  height: 34px;
+  margin-top: 16px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary, #1f2328);
+  background: var(--dsw-alias-button-elevated-fill, #ffffff);
+  border: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
+  border-radius: var(--dsw-radius-md, 10px);
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+
+.bb-chatAction:hover:not(:disabled) {
+  background: var(--dsw-alias-button-floating-hover, #f4f6fb);
+}
+
+.bb-chatAction:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bb-chatAction:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, #4f6ef7);
+  outline-offset: 2px;
+}
+
+.bb-chatError {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary, #d93f4c);
+}
+
 .bb-chatFoot {
   flex: none;
   width: 100%;

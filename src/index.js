@@ -18,6 +18,20 @@ export const name = 'dsh-baibao'
 
 const API = '/dsh-baibao/api/storage'
 
+const PERSONA_TEXT = [
+  '你是百宝，一个独立于其他对话的长期助手。',
+  '说话简洁、直接、有温度；先给结论，再给依据；不谄媚，不堆砌。',
+  '不确定就说不确定；不伪造能力、文件、命令或记忆。',
+  '涉及删除、发布、支付等不可逆操作时，先确认再执行。',
+].join('\n')
+
+let baibaoWorkspacePath = null
+
+function normalizePath(value) {
+  const resolved = path.resolve(value)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
 function dshHome() {
   const configured = process.env.DSH_HOME
   return configured !== undefined && configured.length > 0
@@ -243,6 +257,38 @@ async function deleteBackup(id) {
 }
 
 export function apply(ctx) {
+  void readLocation()
+    .then((location) => {
+      baibaoWorkspacePath = path.join(location.root, 'workspace')
+    })
+    .catch(() => {})
+
+  ctx.effect(
+    () =>
+      ctx.on('agent/created', (payload) => {
+        const agent = payload.agent
+        const cwd = agent.session?.header?.cwd
+        if (
+          baibaoWorkspacePath === null ||
+          typeof cwd !== 'string' ||
+          normalizePath(cwd) !== normalizePath(baibaoWorkspacePath) ||
+          agent.ctx === undefined
+        ) {
+          return
+        }
+        try {
+          agent.ctx.systemPrompt.section({
+            name: 'baibao-persona',
+            order: 50,
+            text: PERSONA_TEXT,
+          })
+        } catch {
+          // A resumed agent may already own the section in this scope.
+        }
+      }),
+    'dsh-baibao: persona section',
+  )
+
   ctx.inject(['webServer'], (hostCtx) => {
     const webServer = hostCtx.webServer
 
@@ -294,6 +340,7 @@ export function apply(ctx) {
                   await createDefaults(root)
                   await writeLocation(root)
                 }
+                baibaoWorkspacePath = path.join(root, 'workspace')
                 sendJson(response, 200, {
                   ok: true,
                   storage: await describe(root, true),
@@ -360,6 +407,55 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: storage backups route',
+    )
+
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/chat/start',
+          handler: async (request, response) => {
+            if (request.method !== 'POST') {
+              response.writeHead(405, { allow: 'POST' })
+              response.end()
+              return
+            }
+            const registry = ctx.get('workspaceRegistry')
+            const controller = ctx.get('sessionController')
+            if (registry === undefined || controller === undefined) {
+              sendJson(response, 503, { ok: false, error: 'workspace-unavailable' })
+              return
+            }
+            try {
+              const location = await readLocation()
+              const workspaceDir = path.join(location.root, 'workspace')
+              await mkdir(workspaceDir, { recursive: true })
+              const workspace = await registry.create(workspaceDir, '百宝')
+              baibaoWorkspacePath = workspace.path
+              let created
+              try {
+                created = await controller.create({ cwd: workspace.path })
+              } catch {
+                created = await controller.create({ workspaceId: workspace.id })
+              }
+              sendJson(response, 200, {
+                ok: true,
+                sessionId: created.sessionId,
+                workspace: {
+                  id: workspace.id,
+                  path: workspace.path,
+                  title: workspace.title,
+                },
+              })
+            } catch (error) {
+              sendJson(response, 500, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        }),
+      'dsh-baibao: chat start route',
     )
   })
 }
