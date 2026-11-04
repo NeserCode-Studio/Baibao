@@ -158,6 +158,7 @@ async function describe(root, configured) {
     configured,
     memoryDir: path.join(root, 'memory'),
     configDir: path.join(root, 'config'),
+    workspaceDir: path.join(root, 'workspace'),
     configFile: path.join(root, 'config', 'baibao.json'),
     exists,
     writable,

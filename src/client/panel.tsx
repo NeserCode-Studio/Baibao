@@ -472,6 +472,10 @@ function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
             <dd>{info.memoryDir}</dd>
           </div>
           <div>
+            <dt>{t('storageWorkspace')}</dt>
+            <dd>{info.workspaceDir}</dd>
+          </div>
+          <div>
             <dt>{t('storageConfig')}</dt>
             <dd>{info.configFile}</dd>
           </div>

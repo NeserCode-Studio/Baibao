@@ -6,6 +6,7 @@ export interface StorageInfo {
   configured: boolean
   memoryDir: string
   configDir: string
+  workspaceDir: string
   configFile: string
   exists: boolean
   writable: boolean
