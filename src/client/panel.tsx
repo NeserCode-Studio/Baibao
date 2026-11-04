@@ -1,6 +1,7 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { BackIcon, BaibaoIcon, SettingsIcon } from './icon'
 import type { BaibaoKey } from './locales'
+import { getStorage, setStorage, type StorageInfo } from './storage-api'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
 export type TranslateBaibao = (key: BaibaoKey, params?: Record<string, unknown>) => string
@@ -212,12 +213,116 @@ function SettingsSection({ t, hidden }: SectionProps) {
       className="bb-section"
       hidden={hidden}
     >
+      <SectionHead title={t('storageTitle')} body={t('storageBody')} />
+      <StorageSettings t={t} />
       <SectionHead title={t('settingsTitle')} body={t('settingsBody')} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('settingsLocalTitle')} body={t('settingsLocalBody')} badge={t('planned')} />
         <Card title={t('settingsMirrorTitle')} body={t('settingsMirrorBody')} badge={t('planned')} />
       </div>
     </section>
+  )
+}
+
+function StorageSettings({ t }: BaibaoPanelProps) {
+  const [info, setInfo] = useState<StorageInfo | null>(null)
+  const [draft, setDraft] = useState('')
+  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading')
+
+  useEffect(() => {
+    let live = true
+    void getStorage().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setInfo(result.storage)
+        setDraft(result.storage.root)
+        setStatus('ready')
+      } else {
+        setStatus('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async (value: string): Promise<void> => {
+    const root = value.trim()
+    if (root === '') return
+    setStatus('saving')
+    const result = await setStorage(root)
+    if (result.ok) {
+      setInfo(result.storage)
+      setDraft(result.storage.root)
+      setStatus('saved')
+    } else {
+      setStatus('error')
+    }
+  }
+
+  return (
+    <div className="bb-storage">
+      <label className="bb-storageLabel" htmlFor="bb-storage-path">
+        {t('storagePath')}
+      </label>
+      <div className="bb-storageRow">
+        <input
+          id="bb-storage-path"
+          className="bb-storageInput"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={t('storagePathPlaceholder')}
+          spellCheck={false}
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          className="bb-storageBtn"
+          onClick={() => void save(draft)}
+          disabled={status === 'saving' || draft.trim() === ''}
+        >
+          {t('storageSave')}
+        </button>
+      </div>
+      <div className="bb-storageActions">
+        <button
+          type="button"
+          className="bb-storageLink"
+          onClick={() => {
+            if (info !== null) void save(info.defaultRoot)
+          }}
+          disabled={info === null || status === 'saving'}
+        >
+          {t('storageReset')}
+        </button>
+      </div>
+      {info !== null && (
+        <dl className="bb-storageMeta">
+          <div>
+            <dt>{t('storageDefault')}</dt>
+            <dd>{info.defaultRoot}</dd>
+          </div>
+          <div>
+            <dt>{t('storageMemory')}</dt>
+            <dd>{info.memoryDir}</dd>
+          </div>
+          <div>
+            <dt>{t('storageConfig')}</dt>
+            <dd>{info.configFile}</dd>
+          </div>
+        </dl>
+      )}
+      {status === 'saved' && (
+        <p className="bb-storageOk" role="status">
+          {t('storageSaved')}
+        </p>
+      )}
+      {status === 'error' && (
+        <p className="bb-storageError" role="alert">
+          {t('storageFailed')}
+        </p>
+      )}
+    </div>
   )
 }
 
