@@ -1,9 +1,10 @@
 /**
- * The 百宝 brand glyph: a slimmer DeepSeek whale with a four-point star eye.
+ * The 百宝 brand glyph: the DeepSeek whale with its belly cut as a tilted
+ * four-point star.
  *
- * The official whale body and fin-shaped tail are kept; only the eye is cut as
- * a star. A light vertical compression makes the silhouette slimmer without
- * redrawing the path.
+ * The official body and fin-shaped tail stay intact; the eye is gone and the
+ * old belly cutout is replaced by the star. The star is a negative-space hole,
+ * so the shell's background shows through.
  *
  * Colour comes from `currentColor` alone, so the sidebar can paint the glyph
  * with the active row colour in both themes.
@@ -32,15 +33,9 @@ const WHALE_BODY =
   + '8.3292 18.0854C16.2497 17.1169 16.7062 17.5109 16.2912 17.1919C17.3477 15.9419 18.9618 13.7198 19.4598 10.6942'
   + 'C19.5088 10.3602 19.5713 9.88968 19.5638 9.61917C19.5598 9.45417 19.5978 9.39016 19.7863 9.37116C20.3073 9.311'
   + '16 20.8128 9.16866 21.2773 8.91315C22.6249 8.17713 23.1684 6.96809 23.2964 5.51905C23.3154 5.29754 23.2924 5.0'
-  + '6853 23.0584 4.95203Z M11.3165 17.9954C9.30097 16.4109 8.32344 15.8894 7.91992 15.9119C7.54241 15.9344 7.61042'
-  + ' 16.3664 7.69342 16.6479C7.78042 16.9259 7.89342 17.1174 8.05193 17.3614C8.16143 17.5229 8.23694 17.7629 7.942'
-  + '43 17.9434C7.29341 18.3449 6.16487 17.8084 6.11187 17.7819C4.79833 17.0084 3.7003 15.9874 2.92628 14.5908C2.17'
-  + '875 13.2468 1.74474 11.8047 1.67324 10.2657C1.65424 9.89418 1.76374 9.76267 2.13375 9.69517C2.62077 9.60517 3.'
-  + '12278 9.58617 3.6093 9.65767C5.66636 9.95818 7.41741 10.8777 8.88545 12.3348C9.72348 13.1643 10.3575 14.1558 1'
-  + '1.0105 15.1243C11.705 16.1529 12.4521 17.1329 13.4036 17.9364C13.7396 18.2179 14.0076 18.4319 14.2641 18.5899C'
-  + '13.4906 18.6764 12.1996 18.6949 11.3165 17.9964V17.9954Z'
+  + '6853 23.0584 4.95203Z'
 
-const EYE_STAR = 'M12.7 9.7c.25 1.0 1.0 1.75 2.0 2.0-1.0.25-1.75 1.0-2.0 2.0-.25-1.0-1.0-1.75-2.0-2.0 1.0-.25 1.75-1.0 2.0-2.0Z'
+const BELLY_STAR = 'M9.94 10.25Q9.93 13.53 12.45 15.64Q9.17 15.63 7.06 18.15Q7.07 14.87 4.55 12.76Q7.83 12.77 9.94 10.25Z'
 
 export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
   return (
@@ -53,9 +48,7 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <g transform="translate(0 1.5) scale(1 0.85)">
-        <path d={`${WHALE_BODY} ${EYE_STAR}`} fill="currentColor" fillRule="evenodd" />
-      </g>
+      <path d={`${WHALE_BODY} ${BELLY_STAR}`} fill="currentColor" fillRule="evenodd" />
     </svg>
   )
 }
