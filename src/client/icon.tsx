@@ -1,8 +1,9 @@
 /**
- * The 百宝 brand glyph: a domed treasure chest with a strap and hasp.
+ * The 百宝 brand glyph: a four-point spark joined to two network nodes.
  *
- * The chest is the name's mascot, not a bookmark metaphor: it is the avatar
- * that identifies the agent in the sidebar and in the chat empty state.
+ * The spark is the "light"; the nodes and the short links are the "AI" side.
+ * Together they read as a small constellation rather than a literal book or
+ * treasure chest.
  *
  * Colour comes from `currentColor` alone — the sidebar paints panel icons with
  * the row's own colour, and the shell switches that colour between themes and
@@ -28,23 +29,20 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {/* Domed lid; its closing line is the chest's seam. */}
+      {/* Light: a four-point spark. */}
       <path
-        d="M2.6 7.35a5.4 3.9 0 0 1 10.8 0Z"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
+        d="M8 2.5c.5 2.6 2.6 4.7 5.2 5.2-2.6.5-4.7 2.6-5.2 5.2-.5-2.6-2.6-4.7-5.2-5.2C5.4 7.2 7.5 5.1 8 2.5Z"
+        fill="currentColor"
       />
-      {/* Body: sides and bottom only, so the seam is drawn once. */}
+      {/* AI: two nodes joined to the spark. */}
       <path
-        d="M2.6 7.35v4.05a1.9 1.9 0 0 0 1.9 1.9h7a1.9 1.9 0 0 0 1.9-1.9V7.35"
+        d="M3.2 3.2 4.7 4.7M12.8 12.8l-1.5-1.5"
         stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
+        strokeWidth="1"
+        strokeLinecap="round"
       />
-      {/* Strap over the lid, ending in the hasp that closes the chest. */}
-      <rect x="7.35" y="5.05" width="1.3" height="3.2" rx="0.65" fill="currentColor" />
-      <rect x="6.85" y="7.15" width="2.3" height="1.75" rx="0.55" fill="currentColor" />
+      <circle cx="2.3" cy="2.3" r="1" fill="currentColor" />
+      <circle cx="13.7" cy="13.7" r="1" fill="currentColor" />
     </svg>
   )
 }
