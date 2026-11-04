@@ -26,6 +26,77 @@ const PERSONA_TEXT = [
 ].join('\n')
 
 let baibaoWorkspacePath = null
+let presetsReady = null
+
+const BAOBAO_PLUGINS = [
+  {
+    id: 'persona',
+    name: '@deepseek-ai/dsh-persona',
+    config: { prefix: PERSONA_TEXT, complete: false },
+  },
+  {
+    id: 'tool-fs',
+    name: '@deepseek-ai/dsh-tool-fs',
+    config: { read: true, readImage: true, write: true, edit: true },
+  },
+  {
+    id: 'compaction',
+    name: 'cordis:group',
+    group: true,
+    isolate: { compaction: true },
+    config: [
+      { id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic' },
+      { id: 'command-compact', name: '@deepseek-ai/dsh-command-compact' },
+    ],
+  },
+  {
+    id: 'terminal',
+    name: 'cordis:group',
+    group: true,
+    isolate: { terminals: true },
+    config: [
+      { id: 'pty', name: '@deepseek-ai/dsh-terminal' },
+      {
+        id: 'terminal-shell',
+        name: '@deepseek-ai/dsh-terminal-bash',
+        config: {
+          shellDialect: process.platform === 'win32' ? 'pwsh' : 'bash',
+          timeoutMs: 300000,
+        },
+      },
+      process.platform === 'win32'
+        ? {
+            id: 'persistent-shell',
+            name: '@deepseek-ai/dsh-tool-pwsh-persistent',
+            config: { timeoutMs: 300000 },
+          }
+        : {
+            id: 'persistent-shell',
+            name: '@deepseek-ai/dsh-tool-bash-persistent',
+            config: { timeoutMs: 300000 },
+          },
+    ],
+  },
+]
+
+async function ensureBaibaoPreset(ctx) {
+  const presets = ctx.get('agentPresets')
+  if (presets === undefined) return false
+  try {
+    const list = await presets.list()
+    if (list.some((preset) => preset.id === 'baibao')) return true
+    await presets.register({
+      id: 'baibao',
+      name: '百宝',
+      description: '百宝的默认 Agent 模式：长期助手人格、文件与终端工具。',
+      order: 20,
+      plugins: BAOBAO_PLUGINS,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
 
 function normalizePath(value) {
   const resolved = path.resolve(value)
@@ -257,6 +328,7 @@ async function deleteBackup(id) {
 }
 
 export function apply(ctx) {
+  presetsReady = ensureBaibaoPreset(ctx)
   void readLocation()
     .then((location) => {
       baibaoWorkspacePath = path.join(location.root, 'workspace')
@@ -276,6 +348,8 @@ export function apply(ctx) {
         ) {
           return
         }
+        const presets = ctx.get('agentPresets')
+        if (presets?.composedPreset?.(agent.ctx) === 'baibao') return
         try {
           agent.ctx.systemPrompt.section({
             name: 'baibao-persona',
@@ -432,15 +506,28 @@ export function apply(ctx) {
               await mkdir(workspaceDir, { recursive: true })
               const workspace = await registry.create(workspaceDir, '百宝')
               baibaoWorkspacePath = workspace.path
+              const presetReady = await presetsReady
+              const preset = presetReady ? 'baibao' : undefined
               let created
               try {
-                created = await controller.create({ cwd: workspace.path })
+                created = await controller.create({
+                  cwd: workspace.path,
+                  ...(preset === undefined ? {} : { agentPreset: preset }),
+                })
               } catch {
-                created = await controller.create({ workspaceId: workspace.id })
+                try {
+                  created = await controller.create({
+                    workspaceId: workspace.id,
+                    ...(preset === undefined ? {} : { agentPreset: preset }),
+                  })
+                } catch {
+                  created = await controller.create({ cwd: workspace.path })
+                }
               }
               sendJson(response, 200, {
                 ok: true,
                 sessionId: created.sessionId,
+                agentPreset: created.agentPreset ?? preset ?? null,
                 workspace: {
                   id: workspace.id,
                   path: workspace.path,
@@ -457,5 +544,6 @@ export function apply(ctx) {
         }),
       'dsh-baibao: chat start route',
     )
+
   })
 }

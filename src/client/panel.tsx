@@ -269,6 +269,13 @@ function SettingsSection({ t, hidden, onPickDirectory }: SectionProps) {
     >
       <SectionHead title={t('storageTitle')} body={t('storageBody')} />
       <StorageSettings t={t} onPickDirectory={onPickDirectory} />
+      <div className="bb-grid">
+        <Card
+          title={t('agentModeTitle')}
+          body={t('agentModeBody')}
+          badge={t('agentModeDefault')}
+        />
+      </div>
       <SectionHead title={t('settingsTitle')} body={t('settingsBody')} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('settingsLocalTitle')} body={t('settingsLocalBody')} badge={t('planned')} />

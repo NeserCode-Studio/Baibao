@@ -79,12 +79,22 @@ export function apply(ctx: Context): void {
     }
     const uiWorkspace = ctx.get('uiWorkspace') as
       | {
-          openWorkspace?: (workspaceId: string) => Promise<void>
+          openWorkspace?: (
+            workspaceId: string,
+            beforeOpen?: (sessionId: string) => void,
+            options?: { agentPreset?: string },
+          ) => Promise<void>
           openSession?: (target: string) => void
         }
       | undefined
     if (uiWorkspace?.openWorkspace !== undefined && result.workspace !== undefined) {
-      await uiWorkspace.openWorkspace(result.workspace.id)
+      try {
+        await uiWorkspace.openWorkspace(result.workspace.id, undefined, {
+          agentPreset: 'baibao',
+        })
+      } catch {
+        await uiWorkspace.openWorkspace(result.workspace.id)
+      }
     } else {
       uiWorkspace?.openSession?.(result.sessionId)
     }
