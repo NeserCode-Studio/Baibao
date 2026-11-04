@@ -207,7 +207,7 @@ function CompactHeader({
       <span className="bb-compactMark">
         <BaibaoIcon size={22} />
       </span>
-      <span className="bb-compactMode">{t('agentModeTitle')}</span>
+      <span className="bb-compactMode">{t('title')}</span>
       {onStartChat !== undefined ? (
         <button
           type="button"
