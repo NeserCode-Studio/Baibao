@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="百宝">
+  <title>百宝</title>
+  <defs>
+    <linearGradient id="baibao-lid" x1="16" y1="7.9" x2="16" y2="14.7" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD98A" />
+      <stop offset="1" stop-color="#E7A044" />
+    </linearGradient>
+    <linearGradient id="baibao-body" x1="16" y1="14.7" x2="16" y2="26.6" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E39B45" />
+      <stop offset="1" stop-color="#B96F27" />
+    </linearGradient>
+  </defs>
+  <path d="M5.2 14.7a10.8 6.8 0 0 1 21.6 0Z" fill="url(#baibao-lid)" stroke="#8A5320" stroke-width="2" stroke-linejoin="round" />
+  <path d="M5.2 14.7v8.1a3.8 3.8 0 0 0 3.8 3.8h14a3.8 3.8 0 0 0 3.8-3.8v-8.1" fill="url(#baibao-body)" stroke="#8A5320" stroke-width="2" stroke-linejoin="round" />
+  <rect x="14.7" y="10.1" width="2.6" height="6.4" rx="1.3" fill="#8A5320" />
+  <rect x="13.6" y="14.2" width="4.8" height="3.7" rx="1.1" fill="#F6D68B" stroke="#8A5320" stroke-width="1.6" />
+  <circle cx="16" cy="16.05" r="0.85" fill="#8A5320" />
+</svg>

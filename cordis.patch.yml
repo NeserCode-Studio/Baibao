@@ -1,0 +1,9 @@
+# dsh bundle patch: mounts the Baibao agent plugin into a profile's layer stack.
+#
+# `dsh plugin --profile <name> add dsh-baibao` reconciles
+# `dsh.profile.bundles` against installed packages and, seeing this
+# declaration, appends the package to the bundle stack; every boot then merges
+# this insert row exactly like a hand-written mount line.
+- insert:
+    - id: dsh-baibao
+      name: 'dsh-baibao'

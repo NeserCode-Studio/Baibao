@@ -1,0 +1,65 @@
+{
+  "name": "dsh-baibao",
+  "version": "0.1.0",
+  "description": "百宝 — an independent personal agent for DeepSeekRuntime (DSH): its own personality, long-term memory, quiet proactive connections, and settings. · DSH 内独立 Agent 插件。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "agent",
+    "memory",
+    "persona",
+    "assistant"
+  ],
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "icon": "assets/icon.svg",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./icon": "./assets/icon.svg",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "assets",
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-client-ui-layout": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.5",
+    "@types/react": "~18.3.3",
+    "@types/react-dom": "~18.3.1",
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "~5.6.3"
+  }
+}

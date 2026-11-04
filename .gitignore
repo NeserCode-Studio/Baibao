@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# build output (npm run build -> lib/client.js, lib/index.js)
+lib/
+
+# local visual-verification artifacts (screenshots / scratch HTML)
+preview/
+
+# AI working directory
+.agent/
+
+# logs and OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
