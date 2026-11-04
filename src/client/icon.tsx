@@ -1,9 +1,9 @@
 /**
- * The 百宝 brand glyph: a four-point spark joined to two network nodes.
+ * The 百宝 brand glyph: a small robot head with a spark antenna.
  *
- * The spark is the "light"; the nodes and the short links are the "AI" side.
- * Together they read as a small constellation rather than a literal book or
- * treasure chest.
+ * The head and eyes carry the AI reading at 16px; the spark on the antenna is
+ * the light. It is intentionally geometric rather than cartoonish so it still
+ * looks at home in the DSH sidebar.
  *
  * Colour comes from `currentColor` alone — the sidebar paints panel icons with
  * the row's own colour, and the shell switches that colour between themes and
@@ -29,20 +29,23 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {/* Light: a four-point spark. */}
+      <rect
+        x="3.4"
+        y="5.4"
+        width="9.2"
+        height="7.6"
+        rx="2.4"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <circle cx="6.2" cy="9" r="1.05" fill="currentColor" />
+      <circle cx="9.8" cy="9" r="1.05" fill="currentColor" />
+      <path d="M6.4 11.1h3.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+      <path d="M8 5.4V3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
       <path
-        d="M8 2.5c.5 2.6 2.6 4.7 5.2 5.2-2.6.5-4.7 2.6-5.2 5.2-.5-2.6-2.6-4.7-5.2-5.2C5.4 7.2 7.5 5.1 8 2.5Z"
+        d="M8 1.1c.18.75.65 1.22 1.4 1.4-.75.18-1.22.65-1.4 1.4-.18-.75-.65-1.22-1.4-1.4.75-.18 1.22-.65 1.4-1.4Z"
         fill="currentColor"
       />
-      {/* AI: two nodes joined to the spark. */}
-      <path
-        d="M3.2 3.2 4.7 4.7M12.8 12.8l-1.5-1.5"
-        stroke="currentColor"
-        strokeWidth="1"
-        strokeLinecap="round"
-      />
-      <circle cx="2.3" cy="2.3" r="1" fill="currentColor" />
-      <circle cx="13.7" cy="13.7" r="1" fill="currentColor" />
     </svg>
   )
 }
