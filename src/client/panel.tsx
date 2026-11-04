@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { BackIcon, BaibaoIcon, SettingsIcon } from './icon'
 import type { BaibaoKey } from './locales'
-import { getStorage, setStorage, type StorageInfo } from './storage-api'
+import { getStorage, setStorage, type StorageInfo, type StorageMigration } from './storage-api'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
 export type TranslateBaibao = (key: BaibaoKey, params?: Record<string, unknown>) => string
@@ -226,6 +226,7 @@ function SettingsSection({ t, hidden }: SectionProps) {
 
 function StorageSettings({ t }: BaibaoPanelProps) {
   const [info, setInfo] = useState<StorageInfo | null>(null)
+  const [migration, setMigration] = useState<StorageMigration | null>(null)
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading')
 
@@ -250,10 +251,12 @@ function StorageSettings({ t }: BaibaoPanelProps) {
     const root = value.trim()
     if (root === '') return
     setStatus('saving')
+    setMigration(null)
     const result = await setStorage(root)
     if (result.ok) {
       setInfo(result.storage)
       setDraft(result.storage.root)
+      setMigration(result.migration ?? null)
       setStatus('saved')
     } else {
       setStatus('error')
@@ -261,7 +264,13 @@ function StorageSettings({ t }: BaibaoPanelProps) {
   }
 
   return (
-    <div className="bb-storage">
+    <div className="bb-storage" aria-busy={status === 'saving'}>
+      {status === 'saving' && (
+        <div className="bb-storageMask" role="status" aria-live="polite">
+          <span className="bb-spinner" aria-hidden="true" />
+          {t('storageMigrating')}
+        </div>
+      )}
       <label className="bb-storageLabel" htmlFor="bb-storage-path">
         {t('storagePath')}
       </label>
@@ -312,10 +321,18 @@ function StorageSettings({ t }: BaibaoPanelProps) {
           </div>
         </dl>
       )}
-      {status === 'saved' && (
+      {status === 'saved' && migration !== null && migration.files > 0 && (
+        <p className="bb-storageOk" role="status">
+          {t('storageMigrated', { files: migration.files, backups: migration.backups })}
+        </p>
+      )}
+      {status === 'saved' && (migration === null || migration.files === 0) && (
         <p className="bb-storageOk" role="status">
           {t('storageSaved')}
         </p>
+      )}
+      {status === 'saved' && migration !== null && migration.keptOld && (
+        <p className="bb-storageHint">{t('storageBackupKept')}</p>
       )}
       {status === 'error' && (
         <p className="bb-storageError" role="alert">

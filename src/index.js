@@ -10,7 +10,7 @@
  * host connection gate before this ships outside a desktop profile.
  */
 import { constants } from 'node:fs'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -98,7 +98,7 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload))
 }
 
-async function ensureStorage(root) {
+async function createDefaults(root) {
   const memoryDir = path.join(root, 'memory')
   const configDir = path.join(root, 'config')
   await mkdir(root, { recursive: true })
@@ -118,12 +118,49 @@ async function ensureStorage(root) {
       'utf8',
     )
   }
+}
 
+async function writeLocation(root) {
   await writeFile(
     locationFile(),
     JSON.stringify({ root, updatedAt: new Date().toISOString() }, null, 2) + '\n',
     'utf8',
   )
+}
+
+function isInside(parent, child) {
+  const relative = path.relative(parent, child)
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
+}
+
+async function copyTree(source, destination, stamp, stats) {
+  if (!(await pathExists(source))) return
+  await mkdir(destination, { recursive: true })
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name)
+    const to = path.join(destination, entry.name)
+    if (entry.isDirectory()) {
+      await copyTree(from, to, stamp, stats)
+      continue
+    }
+    if (!entry.isFile()) continue
+    if (await pathExists(to)) {
+      await rename(to, `${to}.bak-${stamp}`)
+      stats.backups += 1
+    }
+    await copyFile(from, to)
+    stats.files += 1
+  }
+}
+
+async function migrateStorage(from, to) {
+  const stats = { files: 0, backups: 0 }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  await copyTree(path.join(from, 'memory'), path.join(to, 'memory'), stamp, stats)
+  await copyTree(path.join(from, 'config'), path.join(to, 'config'), stamp, stats)
+  await createDefaults(to)
+  await writeLocation(to)
+  return { from, to, files: stats.files, backups: stats.backups, keptOld: true }
 }
 
 export function apply(ctx) {
@@ -158,10 +195,30 @@ export function apply(ctx) {
                   sendJson(response, 400, { ok: false, error: 'filesystem-root' })
                   return
                 }
-                await ensureStorage(root)
+                const previous = await readLocation()
+                if (
+                  previous.root !== root &&
+                  (isInside(previous.root, root) || isInside(root, previous.root))
+                ) {
+                  sendJson(response, 400, { ok: false, error: 'nested-path' })
+                  return
+                }
+                let migration = null
+                const shouldMigrate = body.migrate !== false
+                if (
+                  shouldMigrate &&
+                  previous.root !== root &&
+                  ((await pathExists(previous.root)) || previous.configured)
+                ) {
+                  migration = await migrateStorage(previous.root, root)
+                } else {
+                  await createDefaults(root)
+                  await writeLocation(root)
+                }
                 sendJson(response, 200, {
                   ok: true,
                   storage: await describe(root, true),
+                  migration,
                 })
                 return
               }

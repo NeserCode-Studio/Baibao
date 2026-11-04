@@ -11,8 +11,16 @@ export interface StorageInfo {
   writable: boolean
 }
 
+export interface StorageMigration {
+  from: string
+  to: string
+  files: number
+  backups: number
+  keptOld: boolean
+}
+
 export type StorageResult =
-  | { ok: true; storage: StorageInfo }
+  | { ok: true; storage: StorageInfo; migration?: StorageMigration }
   | { ok: false; error: string }
 
 const ROUTE = '/dsh-baibao/api/storage'
@@ -29,10 +37,11 @@ async function readResult(response: Response): Promise<StorageResult> {
     const body = (await response.json()) as {
       ok?: boolean
       storage?: StorageInfo
+      migration?: StorageMigration
       error?: string
     }
     if (body.ok === true && body.storage !== undefined) {
-      return { ok: true, storage: body.storage }
+      return { ok: true, storage: body.storage, migration: body.migration }
     }
     return { ok: false, error: body.error ?? `http-${response.status}` }
   } catch {
