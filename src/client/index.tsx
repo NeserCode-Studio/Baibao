@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { BaibaoIcon } from './icon'
 import { en, zh } from './locales'
 import panelCss from './panel.css'
-import { BaibaoPanel } from './panel'
+import { BaibaoPanel, type TranslateBaibao } from './panel'
 
 export const name = 'dsh-baibao'
 
@@ -62,6 +62,19 @@ export function apply(ctx: Context): void {
     'dsh-baibao: sidebar entry',
   )
 
+  const pickDirectory = async (): Promise<string | null> => {
+    const uiWorkspace = ctx.get('uiWorkspace') as
+      | { pickDirectory?: () => Promise<string | null> }
+      | undefined
+    return uiWorkspace?.pickDirectory !== undefined
+      ? await uiWorkspace.pickDirectory()
+      : null
+  }
+
+  const BaibaoPanelSeat = ({ t: translate }: { t: TranslateBaibao }) => (
+    <BaibaoPanel t={translate} onPickDirectory={pickDirectory} />
+  )
+
   ctx.effect(
     () =>
       ctx.slots.inject('main', () =>
@@ -71,7 +84,7 @@ export function apply(ctx: Context): void {
             key: PANEL_ID,
             locale: NS,
           },
-          BaibaoPanel,
+          BaibaoPanelSeat,
         ),
       ),
     'dsh-baibao: main panel',

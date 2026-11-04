@@ -9,6 +9,8 @@ export type TranslateBaibao = (key: BaibaoKey, params?: Record<string, unknown>)
 export interface BaibaoPanelProps {
   /** Injected by the slot renderer because the registration declares `locale`. */
   t: TranslateBaibao
+  /** Opens the host's native directory picker. */
+  onPickDirectory?: () => Promise<string | null>
 }
 
 type SectionProps = BaibaoPanelProps & { hidden: boolean }
@@ -30,7 +32,7 @@ type SettingsTab = (typeof SETTINGS_TABS)[number]['id']
  * disabled until M2 wires the native DSH session. The settings view is the
  * single home for everything that is not conversation.
  */
-export function BaibaoPanel({ t }: BaibaoPanelProps) {
+export function BaibaoPanel({ t, onPickDirectory }: BaibaoPanelProps) {
   const [view, setView] = useState<View>('chat')
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('memory')
 
@@ -44,6 +46,7 @@ export function BaibaoPanel({ t }: BaibaoPanelProps) {
           tab={settingsTab}
           onTab={setSettingsTab}
           onBack={() => setView('chat')}
+          onPickDirectory={onPickDirectory}
         />
       )}
     </div>
@@ -100,6 +103,7 @@ function SettingsView({
   tab,
   onTab,
   onBack,
+  onPickDirectory,
 }: BaibaoPanelProps & {
   tab: SettingsTab
   onTab: (tab: SettingsTab) => void
@@ -156,7 +160,7 @@ function SettingsView({
       <main className="bb-settingsBody">
         <MemorySection t={t} hidden={tab !== 'memory'} />
         <ConnectionsSection t={t} hidden={tab !== 'connections'} />
-        <SettingsSection t={t} hidden={tab !== 'settings'} />
+        <SettingsSection t={t} hidden={tab !== 'settings'} onPickDirectory={onPickDirectory} />
       </main>
 
       <footer className="bb-foot">
@@ -204,7 +208,7 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
   )
 }
 
-function SettingsSection({ t, hidden }: SectionProps) {
+function SettingsSection({ t, hidden, onPickDirectory }: SectionProps) {
   return (
     <section
       id="bb-panel-settings"
@@ -214,7 +218,7 @@ function SettingsSection({ t, hidden }: SectionProps) {
       hidden={hidden}
     >
       <SectionHead title={t('storageTitle')} body={t('storageBody')} />
-      <StorageSettings t={t} />
+      <StorageSettings t={t} onPickDirectory={onPickDirectory} />
       <SectionHead title={t('settingsTitle')} body={t('settingsBody')} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('settingsLocalTitle')} body={t('settingsLocalBody')} badge={t('planned')} />
@@ -224,7 +228,7 @@ function SettingsSection({ t, hidden }: SectionProps) {
   )
 }
 
-function StorageSettings({ t }: BaibaoPanelProps) {
+function StorageSettings({ t, onPickDirectory }: BaibaoPanelProps) {
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [migration, setMigration] = useState<StorageMigration | null>(null)
   const [draft, setDraft] = useState('')
@@ -263,6 +267,20 @@ function StorageSettings({ t }: BaibaoPanelProps) {
     }
   }
 
+  const pick = async (): Promise<void> => {
+    if (onPickDirectory === undefined) return
+    try {
+      const next = await onPickDirectory()
+      if (next !== null && next.trim() !== '') {
+        setDraft(next)
+        setStatus('ready')
+        setMigration(null)
+      }
+    } catch {
+      setStatus('error')
+    }
+  }
+
   return (
     <div className="bb-storage" aria-busy={status === 'saving'}>
       {status === 'saving' && (
@@ -275,15 +293,18 @@ function StorageSettings({ t }: BaibaoPanelProps) {
         {t('storagePath')}
       </label>
       <div className="bb-storageRow">
-        <input
+        <button
           id="bb-storage-path"
-          className="bb-storageInput"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={t('storagePathPlaceholder')}
-          spellCheck={false}
-          autoComplete="off"
-        />
+          type="button"
+          className="bb-storagePath"
+          onClick={() => void pick()}
+          disabled={status === 'saving' || onPickDirectory === undefined}
+          title={draft !== '' ? draft : t('storagePathPlaceholder')}
+          aria-label={t('storagePath')}
+        >
+          <span className="bb-storagePathText">{draft !== '' ? draft : t('storagePathPlaceholder')}</span>
+          <span className="bb-storagePathBrowse">{t('storageBrowse')}</span>
+        </button>
         <button
           type="button"
           className="bb-storageBtn"
