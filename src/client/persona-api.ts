@@ -25,7 +25,10 @@ function apiPath(path: string): string {
 }
 
 function normalize(value: unknown): JungPersona {
-  const source = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const outer = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const source = (outer.jung !== null && typeof outer.jung === 'object'
+    ? outer.jung
+    : outer) as Record<string, unknown>
   const result = {} as JungPersona
   for (const axis of Object.keys(DEFAULT_JUNG) as JungAxis[]) {
     const raw = source[axis]

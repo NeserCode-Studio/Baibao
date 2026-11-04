@@ -383,7 +383,7 @@ async function writePersona(input) {
   config.persona = { jung }
   config.updatedAt = new Date().toISOString()
   await writeConfigData(config)
-  return { jung }
+  return jung
 }
 
 function pole(value, negative, positive) {
