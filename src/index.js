@@ -27,6 +27,7 @@ const PERSONA_TEXT = [
 
 let baibaoWorkspacePath = null
 let presetsReady = null
+let presetsResolve = null
 
 const BAOBAO_PLUGINS = [
   {
@@ -79,8 +80,7 @@ const BAOBAO_PLUGINS = [
   },
 ]
 
-async function ensureBaibaoPreset(ctx) {
-  const presets = ctx.get('agentPresets')
+async function ensureBaibaoPreset(presets) {
   if (presets === undefined) return false
   try {
     const list = await presets.list()
@@ -537,7 +537,23 @@ function memoryTools() {
 }
 
 export function apply(ctx) {
-  presetsReady = ensureBaibaoPreset(ctx)
+  presetsReady = new Promise((resolve) => {
+    presetsResolve = resolve
+  })
+  const presetTimer = setTimeout(() => {
+    presetsResolve?.(false)
+  }, 3000)
+  ctx.inject(['agentPresets'], (presetCtx) => {
+    void ensureBaibaoPreset(presetCtx.agentPresets)
+      .then((ready) => {
+        clearTimeout(presetTimer)
+        presetsResolve?.(ready)
+      })
+      .catch(() => {
+        clearTimeout(presetTimer)
+        presetsResolve?.(false)
+      })
+  })
   void readLocation()
     .then((location) => {
       baibaoWorkspacePath = path.join(location.root, 'workspace')

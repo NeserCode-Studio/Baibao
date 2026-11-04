@@ -88,10 +88,13 @@ export function apply(ctx: Context): void {
         }
       | undefined
     if (uiWorkspace?.openWorkspace !== undefined && result.workspace !== undefined) {
+      const preset = result.agentPreset === 'baibao' ? 'baibao' : undefined
       try {
-        await uiWorkspace.openWorkspace(result.workspace.id, undefined, {
-          agentPreset: 'baibao',
-        })
+        await uiWorkspace.openWorkspace(
+          result.workspace.id,
+          undefined,
+          preset === undefined ? undefined : { agentPreset: preset },
+        )
       } catch {
         await uiWorkspace.openWorkspace(result.workspace.id)
       }

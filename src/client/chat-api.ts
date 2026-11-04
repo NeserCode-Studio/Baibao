@@ -3,6 +3,7 @@
 export interface StartChatResult {
   ok: boolean
   sessionId?: string
+  agentPreset?: string | null
   workspace?: { id: string; path: string; title: string }
   error?: string
 }
