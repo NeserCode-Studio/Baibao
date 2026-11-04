@@ -11,6 +11,12 @@
   color: var(--dsw-alias-label-primary, #1f2328);
 }
 
+.bb-root *,
+.bb-root *::before,
+.bb-root *::after {
+  box-sizing: border-box;
+}
+
 .bb-chat,
 .bb-settings {
   display: flex;
@@ -180,6 +186,7 @@
   gap: 2px;
   padding: 0 16px;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d9dee6);
 }
 
