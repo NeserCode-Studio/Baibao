@@ -158,7 +158,7 @@ async function describe(root, configured) {
     configured,
     memoryDir: path.join(root, 'memory'),
     configDir: path.join(root, 'config'),
-    workspaceDir: path.join(root, 'workspace'),
+    workspaceDir: path.join(defaultRoot(), 'workspace'),
     configFile: path.join(root, 'config', 'baibao.json'),
     exists,
     writable,
@@ -470,32 +470,11 @@ function memoryTools() {
         additionalProperties: false,
       },
       output: {
-        schema: {
-          type: 'object',
-          properties: {
-            entries: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  text: { type: 'string' },
-                  kind: { type: 'string' },
-                },
-                required: ['id', 'text', 'kind'],
-              },
-            },
-          },
-          required: ['entries'],
-          additionalProperties: false,
-        },
+        schema: { type: 'string' },
         render: (value) => [
           {
             type: 'text',
-            text:
-              value.entries.length === 0
-                ? '没有找到相关记忆。'
-                : value.entries.map((entry) => `- ${entry.text}`).join('\n'),
+            text: typeof value === 'string' ? value : '没有找到相关记忆。',
           },
         ],
       },
@@ -504,13 +483,9 @@ function memoryTools() {
           typeof input.query === 'string' ? input.query : '',
           typeof input.limit === 'number' ? input.limit : 10,
         )
-        return {
-          entries: entries.map((entry) => ({
-            id: entry.id,
-            text: entry.text,
-            kind: entry.kind,
-          })),
-        }
+        return entries.length === 0
+          ? '没有找到相关记忆。'
+          : entries.map((entry) => `- [${entry.kind}] ${entry.text}`).join('\n')
       },
     },
     {
@@ -568,8 +543,8 @@ export function apply(ctx) {
       })
   })
   void readLocation()
-    .then((location) => {
-      baibaoWorkspacePath = path.join(location.root, 'workspace')
+    .then(() => {
+      baibaoWorkspacePath = path.join(defaultRoot(), 'workspace')
     })
     .catch(() => {})
 
@@ -587,39 +562,46 @@ export function apply(ctx) {
           return
         }
         const presets = ctx.get('agentPresets')
-        const isBaibaoPreset = presets?.composedPreset?.(agent.ctx) === 'baibao'
-        if (!isBaibaoPreset) {
-          try {
-            agent.ctx.systemPrompt.section({
-              name: 'baibao-persona',
-              order: 50,
-              text: PERSONA_TEXT,
-            })
-          } catch {
-            // A resumed agent may already own the section in this scope.
+        void (async () => {
+          let selected = presets?.composedPreset?.(agent.ctx) === 'baibao'
+          if (!selected && typeof presets?.select === 'function') {
+            try {
+              await presets.select(agent, 'baibao')
+              selected = true
+            } catch {
+              // Closed sessions or a missing preset keep their current composition.
+            }
           }
-        }
-        try {
-          for (const tool of memoryTools()) {
-            agent.ctx.tools.register(tool)
-          }
-        } catch {
-          // A resumed agent may already own these tools in this scope.
-        }
-        void listMemory()
-          .then((entries) => {
-            if (entries.length === 0) return
+          if (!selected) {
             try {
               agent.ctx.systemPrompt.section({
-                name: 'baibao-memory-context',
-                order: 60,
-                text: renderMemoryContext(entries),
+                name: 'baibao-persona',
+                order: 50,
+                text: PERSONA_TEXT,
               })
             } catch {
               // A resumed agent may already own the section in this scope.
             }
-          })
-          .catch(() => {})
+          }
+          try {
+            for (const tool of memoryTools()) {
+              agent.ctx.tools.register(tool)
+            }
+          } catch {
+            // A resumed agent may already own these tools in this scope.
+          }
+          const entries = await listMemory()
+          if (entries.length === 0) return
+          try {
+            agent.ctx.systemPrompt.section({
+              name: 'baibao-memory-context',
+              order: 60,
+              text: renderMemoryContext(entries),
+            })
+          } catch {
+            // A resumed agent may already own the section in this scope.
+          }
+        })().catch(() => {})
       }),
     'dsh-baibao: persona section',
   )
@@ -675,7 +657,7 @@ export function apply(ctx) {
                   await createDefaults(root)
                   await writeLocation(root)
                 }
-                baibaoWorkspacePath = path.join(root, 'workspace')
+                baibaoWorkspacePath = path.join(defaultRoot(), 'workspace')
                 sendJson(response, 200, {
                   ok: true,
                   storage: await describe(root, true),
@@ -809,8 +791,7 @@ export function apply(ctx) {
               return
             }
             try {
-              const location = await readLocation()
-              const workspaceDir = path.join(location.root, 'workspace')
+              const workspaceDir = path.join(defaultRoot(), 'workspace')
               await mkdir(workspaceDir, { recursive: true })
               const workspace = await registry.create(workspaceDir, '百宝')
               baibaoWorkspacePath = workspace.path
