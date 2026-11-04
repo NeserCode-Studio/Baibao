@@ -4,9 +4,10 @@ import { useId } from 'react'
  * The 百宝 brand glyph: the DeepSeek whale with its tail and eye replaced by
  * four-point light stars.
  *
- * The body path is the official whale mark: the tail flukes are removed by a
- * mask and replaced by a star, and the eye is cut as a smaller star. The whale
- * stays recognisable; the two stars carry the light motif.
+ * The body path is the official whale mark: the tail flukes are cut away, the
+ * star is laid over the back so the join stays continuous, and the eye is cut
+ * as a smaller star. The whale stays recognisable; the two stars carry the
+ * light motif.
  *
  * Colour comes from `currentColor` alone, so the sidebar can paint the glyph
  * with the active row colour in both themes.
@@ -43,9 +44,11 @@ const WHALE_BODY =
   + '1.0105 15.1243C11.705 16.1529 12.4521 17.1329 13.4036 17.9364C13.7396 18.2179 14.0076 18.4319 14.2641 18.5899C'
   + '13.4906 18.6764 12.1996 18.6949 11.3165 17.9964V17.9954Z'
 
-const EYE_STAR = 'M16.2 9.9c.3 1.55 1.45 2.7 3 3-1.55.3-2.7 1.45-3 3-.3-1.55-1.45-2.7-3-3 1.55-.3 2.7-1.45 3-3Z'
+const EYE_STAR =
+  'M13.4 8.8c.25 1.05 1.05 1.85 2.1 2.1-1.05.25-1.85 1.05-2.1 2.1-.25-1.05-1.05-1.85-2.1-2.1 1.05-.25 1.85-1.05 2.1-2.1Z'
 
-const TAIL_STAR = 'M20.5 3.4c.35 1.65 1.65 2.95 3.3 3.3-1.65.35-2.95 1.65-3.3 3.3-.35-1.65-1.65-2.95-3.3-3.3 1.65-.35 2.95-1.65 3.3-3.3Z'
+const TAIL_STAR =
+  'M20.2 3.0c.4 1.9 1.9 3.4 3.8 3.8-1.9.4-3.4 1.9-3.8 3.8-.4-1.9-1.9-3.4-3.8-3.8 1.9-.4 3.4-1.9 3.8-3.8Z'
 
 export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
   const maskId = `bb-${useId().replace(/:/g, '')}`
@@ -62,8 +65,7 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       <defs>
         <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
           <rect width="24" height="24" fill="white" />
-          <rect x="15.2" y="3" width="8.8" height="5" fill="black" />
-          <path d={TAIL_STAR} fill="black" />
+          <rect x="15" y="3" width="9" height="5" fill="black" />
           <path d={EYE_STAR} fill="black" />
         </mask>
       </defs>
