@@ -34,7 +34,7 @@ DSH 里的一个**独立 Agent**：有自己的性格、跨会话的长期记忆
 ## 现在有什么
 
 ```
-assets/icon.svg        百宝品牌图标（DeepSeek 鲸鱼 + 光星尾/眼）
+assets/icon.svg        百宝品牌图标（瘦身 DeepSeek 鲸鱼 + 四角星眼）
 src/index.js           宿主入口：M0 无行为，只让包进入 profile 插件树
 src/client/index.tsx   客户端入口：侧栏行 + 百宝面板
 src/client/panel.tsx   面板骨架：对话页 + 设置面板（记忆 / 连接 / 设置）

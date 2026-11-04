@@ -1,13 +1,9 @@
-import { useId } from 'react'
-
 /**
- * The 百宝 brand glyph: the DeepSeek whale with its tail and eye replaced by
- * four-point light stars.
+ * The 百宝 brand glyph: a slimmer DeepSeek whale with a four-point star eye.
  *
- * The body path is the official whale mark: the tail flukes are cut away, the
- * star is laid over the back so the join stays continuous, and the eye is cut
- * as a smaller star. The whale stays recognisable; the two stars carry the
- * light motif.
+ * The official whale body and fin-shaped tail are kept; only the eye is cut as
+ * a star. A light vertical compression makes the silhouette slimmer without
+ * redrawing the path.
  *
  * Colour comes from `currentColor` alone, so the sidebar can paint the glyph
  * with the active row colour in both themes.
@@ -44,14 +40,9 @@ const WHALE_BODY =
   + '1.0105 15.1243C11.705 16.1529 12.4521 17.1329 13.4036 17.9364C13.7396 18.2179 14.0076 18.4319 14.2641 18.5899C'
   + '13.4906 18.6764 12.1996 18.6949 11.3165 17.9964V17.9954Z'
 
-const EYE_STAR =
-  'M12.7 9.7c.25 1.0 1.0 1.75 2.0 2.0-1.0.25-1.75 1.0-2.0 2.0-.25-1.0-1.0-1.75-2.0-2.0 1.0-.25 1.75-1.0 2.0-2.0Z'
-
-const TAIL_STAR =
-  'M18.8 9.8C17.8 9.2 16.9 8.2 16.4 7.0C17.5 6.4 19.0 4.4 20.2 3.0C20.6 4.9 22.5 6.5 24.0 7.0C22.5 7.5 20.6 9.0 20.2 11.0C19.6 10.3 19.1 9.8 18.8 9.8Z'
+const EYE_STAR = 'M12.7 9.7c.25 1.0 1.0 1.75 2.0 2.0-1.0.25-1.75 1.0-2.0 2.0-.25-1.0-1.0-1.75-2.0-2.0 1.0-.25 1.75-1.0 2.0-2.0Z'
 
 export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
-  const maskId = `bb-${useId().replace(/:/g, '')}`
   return (
     <svg
       aria-hidden="true"
@@ -62,15 +53,9 @@ export function BaibaoIcon({ size = 16 }: BaibaoIconProps) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <defs>
-        <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
-          <rect width="24" height="24" fill="white" />
-          <rect x="15" y="2.8" width="9" height="5.4" fill="black" />
-          <path d={EYE_STAR} fill="black" />
-        </mask>
-      </defs>
-      <path d={WHALE_BODY} fill="currentColor" mask={`url(#${maskId})`} />
-      <path d={TAIL_STAR} fill="currentColor" />
+      <g transform="translate(0 1.5) scale(1 0.85)">
+        <path d={`${WHALE_BODY} ${EYE_STAR}`} fill="currentColor" fillRule="evenodd" />
+      </g>
     </svg>
   )
 }
