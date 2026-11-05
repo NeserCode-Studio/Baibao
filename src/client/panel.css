@@ -328,6 +328,106 @@
   color: var(--dsw-alias-label-secondary, #5c6570);
 }
 
+.bb-consolidation {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.bb-consolidationRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bb-consolidationLabel {
+  min-width: 48px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.bb-consolidationSelect {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.bb-consolidationSelect:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bb-consolidationSelect:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, #4f6ef7);
+  outline-offset: 1px;
+}
+
+.bb-personaWarn {
+  margin: 0;
+  font-size: 12px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-secondary, #5c6570);
+}
+
+.bb-personaWarn::before {
+  content: '⚠ ';
+  color: var(--dsw-alias-label-primary);
+}
+
+.bb-presetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bb-preset {
+  height: 30px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.bb-preset:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.bb-presetActive,
+.bb-presetActive:hover:not(:disabled) {
+  color: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-label-primary);
+}
+
+.bb-preset:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bb-preset:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, #4f6ef7);
+  outline-offset: 2px;
+}
+
 .bb-persona {
   display: grid;
   grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);

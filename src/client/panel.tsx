@@ -12,6 +12,7 @@ import {
   type StorageMigration,
 } from './storage-api'
 import { deleteMemory, listMemory, type MemoryEntry } from './memory-api'
+import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
 import {
   DEFAULT_JUNG,
   DEFAULT_JUNG_TEXT,
@@ -19,6 +20,8 @@ import {
   savePersona,
   type JungAxis,
   type JungPersona,
+  type PersonaAuditNote,
+  type PersonaPreset,
 } from './persona-api'
 
 /** The framework's translate seat for the `dsh-baibao` namespace. */
@@ -345,6 +348,9 @@ function JungChart({ persona, label }: { persona: JungPersona; label: string }) 
 
 function PersonaSection({ t, hidden }: SectionProps) {
   const [persona, setPersona] = useState<JungPersona>({ ...DEFAULT_JUNG })
+  const [preset, setPreset] = useState<string | null>(null)
+  const [presets, setPresets] = useState<PersonaPreset[]>([])
+  const [audit, setAudit] = useState<PersonaAuditNote[]>([])
   const [baseText, setBaseText] = useState(DEFAULT_JUNG_TEXT)
   const [defaultText, setDefaultText] = useState(DEFAULT_JUNG_TEXT)
   const [limit, setLimit] = useState(600)
@@ -358,6 +364,9 @@ function PersonaSection({ t, hidden }: SectionProps) {
       if (!live) return
       if (result.ok) {
         setPersona(result.persona)
+        setPreset(result.preset)
+        setPresets(result.presets)
+        setAudit(result.audit)
         setBaseText(result.text)
         setDefaultText(result.defaultText)
         setLimit(result.limit)
@@ -376,11 +385,21 @@ function PersonaSection({ t, hidden }: SectionProps) {
     setStatus('ready')
   }
 
-  const save = async (text?: string): Promise<void> => {
+  const applyPreset = (id: string): void => {
+    const found = presets.find((item) => item.id === id)
+    if (found === undefined) return
+    setPersona({ ...found.jung })
+    setPreset(id)
+    setStatus('ready')
+  }
+
+  const save = async (text?: string, presetId?: string | null): Promise<void> => {
     setStatus('saving')
-    const result = await savePersona(persona, text)
+    const result = await savePersona(persona, text, presetId === undefined ? preset : presetId)
     if (result.ok) {
       setPersona(result.persona)
+      setPreset(result.preset)
+      setAudit(result.audit)
       setBaseText(result.text)
       setDefaultText(result.defaultText)
       setLimit(result.limit)
@@ -399,6 +418,22 @@ function PersonaSection({ t, hidden }: SectionProps) {
       hidden={hidden}
     >
       <SectionHead title={t('personaTitle')} body={t('personaBody')} />
+      <div className="bb-presetRow" role="group" aria-label={t('personaPresetTitle')}>
+        {presets.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={item.id === preset ? 'bb-preset bb-presetActive' : 'bb-preset'}
+            aria-pressed={item.id === preset}
+            title={item.summary}
+            onClick={() => applyPreset(item.id)}
+            disabled={status === 'saving'}
+          >
+            {item.name}
+          </button>
+        ))}
+      </div>
+      <p className="bb-storageHint">{t('personaPresetBody')}</p>
       <div className="bb-persona">
         <JungChart persona={persona} label={t('personaChart')} />
         <div className="bb-jungControls">
@@ -438,6 +473,7 @@ function PersonaSection({ t, hidden }: SectionProps) {
               className="bb-secondaryBtn"
               onClick={() => {
                 setPersona({ ...DEFAULT_JUNG })
+                setPreset('balanced')
                 setStatus('ready')
               }}
               disabled={status === 'saving'}
@@ -455,6 +491,15 @@ function PersonaSection({ t, hidden }: SectionProps) {
               {t('personaFailed')}
             </p>
           )}
+          {audit.map((note) => (
+            <p
+              key={note.text}
+              className={note.level === 'warn' ? 'bb-personaWarn' : 'bb-storageHint'}
+              role={note.level === 'warn' ? 'alert' : undefined}
+            >
+              {note.text}
+            </p>
+          ))}
           <p className="bb-storageHint">{t('personaNewSession')}</p>
         </div>
       </div>
@@ -658,11 +703,135 @@ function SettingsSection({ t, hidden, onPickDirectory }: SectionProps) {
         />
       </div>
       <SectionHead title={t('settingsTitle')} body={t('settingsBody')} />
+      <ConsolidationSettings t={t} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('settingsLocalTitle')} body={t('settingsLocalBody')} badge={t('planned')} />
         <Card title={t('settingsMirrorTitle')} body={t('settingsMirrorBody')} badge={t('planned')} />
       </div>
     </section>
+  )
+}
+
+/**
+ * Consolidation model picker.
+ *
+ * Leaving it empty keeps the heuristic extractor, so the control is honest
+ * about being optional rather than a required setup step.
+ */
+function ConsolidationSettings({ t }: { t: TranslateBaibao }) {
+  const [models, setModels] = useState<ModelChoice[]>([])
+  const [provider, setProvider] = useState('')
+  const [model, setModel] = useState('')
+  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading')
+
+  useEffect(() => {
+    let live = true
+    void getConfig().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setModels(result.models)
+        setProvider(result.consolidation.provider ?? '')
+        setModel(result.consolidation.model ?? '')
+        setStatus('ready')
+      } else {
+        setStatus('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async (nextProvider: string, nextModel: string): Promise<void> => {
+    setStatus('saving')
+    const result = await saveConsolidationModel(
+      nextProvider === '' ? null : nextProvider,
+      nextModel === '' ? null : nextModel,
+    )
+    if (result.ok) {
+      setModels(result.models)
+      setStatus('saved')
+    } else {
+      setStatus('error')
+    }
+  }
+
+  const choices = models.filter((item) => provider === '' || item.provider === provider)
+  const providers = [...new Map(models.map((item) => [item.provider, item])).values()]
+
+  return (
+    <div className="bb-consolidation">
+      <div className="bb-jungRowTop">
+        <span className="bb-jungBlockTitle">{t('consolidationTitle')}</span>
+      </div>
+      <p className="bb-storageHint">{t('consolidationBody')}</p>
+      <div className="bb-consolidationRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-consolidation-provider">
+          {t('consolidationProvider')}
+        </label>
+        <select
+          id="bb-consolidation-provider"
+          className="bb-consolidationSelect"
+          value={provider}
+          disabled={status === 'loading' || status === 'saving'}
+          onChange={(event) => {
+            const next = event.target.value
+            setProvider(next)
+            setModel('')
+            setStatus('ready')
+          }}
+        >
+          <option value="">{t('consolidationOff')}</option>
+          {providers.map((item) => (
+            <option key={item.provider} value={item.provider}>
+              {item.providerName}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="bb-consolidationRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-consolidation-model">
+          {t('consolidationModel')}
+        </label>
+        <select
+          id="bb-consolidation-model"
+          className="bb-consolidationSelect"
+          value={model}
+          disabled={provider === '' || status === 'loading' || status === 'saving'}
+          onChange={(event) => {
+            setModel(event.target.value)
+            setStatus('ready')
+          }}
+        >
+          <option value="">{t('consolidationPickModel')}</option>
+          {choices.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="bb-personaActions">
+        <button
+          type="button"
+          className="bb-personaBtn"
+          onClick={() => void save(provider, model)}
+          disabled={status === 'loading' || status === 'saving'}
+        >
+          {t('consolidationSave')}
+        </button>
+      </div>
+      {status === 'saved' && (
+        <p className="bb-storageOk" role="status">
+          {t('consolidationSaved')}
+        </p>
+      )}
+      {status === 'error' && (
+        <p className="bb-storageError" role="alert">
+          {t('consolidationFailed')}
+        </p>
+      )}
+    </div>
   )
 }
 

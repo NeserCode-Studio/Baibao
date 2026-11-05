@@ -18,23 +18,24 @@ export const name = 'dsh-baibao'
 
 const API = '/dsh-baibao/api/storage'
 
-const PERSONA_TEXT = [
+const DEFAULT_PERSONA_TEXT = [
   '你是百宝，一个独立于其他对话的长期助手。',
   '说话简洁、直接、有温度；先给结论，再给依据；不谄媚，不堆砌。',
   '不确定就说不确定；不伪造能力、文件、命令或记忆。',
   '涉及删除、发布、支付等不可逆操作时，先确认再执行。',
 ].join('\n')
 
+const PERSONA_TEXT_LIMIT = 600
+
 let baibaoWorkspacePath = null
 let presetsReady = null
 let presetsResolve = null
 
+// The persona text is injected per agent from `config.persona.text` in the
+// `agent/created` handler, so the preset must not carry its own hardcoded
+// prefix: a stale copy would silently override the user's edits in the very
+// path that always composes this preset.
 const BAOBAO_PLUGINS = [
-  {
-    id: 'persona',
-    name: '@deepseek-ai/dsh-persona',
-    config: { prefix: PERSONA_TEXT, complete: false },
-  },
   {
     id: 'tool-fs',
     name: '@deepseek-ai/dsh-tool-fs',
@@ -329,6 +330,8 @@ async function deleteBackup(id) {
 }
 
 const MEMORY_KINDS = new Set(['fact', 'preference', 'episode'])
+/** Where a memory came from; drives trust instead of a model-reported score. */
+const MEMORY_SOURCES = new Set(['user-explicit', 'agent-inferred'])
 const JUNG_AXES = ['energy', 'information', 'decisions', 'lifestyle']
 const DEFAULT_JUNG = {
   energy: -20,
@@ -337,6 +340,69 @@ const DEFAULT_JUNG = {
   lifestyle: 10,
 }
 let memoryQueue = Promise.resolve()
+
+/**
+ * 人格预设：一组四轴取值 + 一段风格说明。
+ *
+ * 预设只填「倾向」与「风格提示」，不覆盖用户的基础提示词——身份与原则
+ * 始终来自 `config.persona.text`，预设只决定语气被拧到哪一侧。
+ */
+const PERSONA_PRESETS = [
+  {
+    id: 'balanced',
+    name: '均衡',
+    summary: '先理解，再给判断；多数场景下适用。',
+    jung: { energy: -20, information: 20, decisions: 30, lifestyle: 10 },
+    style: [
+      '先复述对方在意的点，再给结论和依据。',
+      '结论先行，但保留一句解释；不确定就说不确定。',
+    ],
+  },
+  {
+    id: 'direct',
+    name: '直接',
+    summary: '结论先行，指出问题，不绕弯。',
+    jung: { energy: -10, information: 10, decisions: 90, lifestyle: 70 },
+    style: [
+      '第一句就给结论或判断，再给依据；不要铺垫。',
+      '发现更优解时直接说，并说明代价；不为附和而附和。',
+    ],
+  },
+  {
+    id: 'warm',
+    name: '温和',
+    summary: '先接住情绪，再谈事情；少打断。',
+    jung: { energy: 20, information: -10, decisions: 80, lifestyle: -10 },
+    style: [
+      '先回应对方的处境和情绪，再进入问题本身。',
+      '多用「我们可以」，少用「你应该」；提问代替断言。',
+    ],
+  },
+  {
+    id: 'quiet',
+    name: '安静',
+    summary: '少说、想清楚再说；不主动延伸。',
+    jung: { energy: -70, information: -20, decisions: -20, lifestyle: -50 },
+    style: [
+      '默认短答；只在被问到时展开。',
+      '不主动追加建议、不开无关话题、不重复已知信息。',
+    ],
+  },
+  {
+    id: 'partner',
+    name: '伙伴',
+    summary: '一起把事情往前推；会追问关键约束。',
+    jung: { energy: 60, information: 50, decisions: 20, lifestyle: 20 },
+    style: [
+      '把用户的事当成自己的事：主动追问关键约束，复述下一步。',
+      '可以调侃，但不影响信息密度；收尾时列清楚待办。',
+    ],
+  },
+]
+
+function findPersonaPreset(id) {
+  return PERSONA_PRESETS.find((preset) => preset.id === id)
+}
 
 function normalizeJung(input) {
   const source = input !== null && typeof input === 'object' ? input : {}
@@ -374,33 +440,167 @@ async function writeConfigData(data) {
 
 async function readPersona() {
   const config = await readConfigData()
-  return normalizeJung(config.persona?.jung)
+  const presetId = typeof config.persona?.preset === 'string' ? config.persona.preset : null
+  const preset = presetId === null ? null : findPersonaPreset(presetId)
+  return { jung: normalizeJung(config.persona?.jung), preset: preset?.id ?? null }
 }
 
 async function writePersona(input) {
   const config = await readConfigData()
   const jung = normalizeJung(input?.jung ?? input)
-  config.persona = { jung }
+  // An explicit preset id switches the axes wholesale; `preset: null` keeps the
+  // axes but drops the style block, i.e. a hand-tuned persona.
+  let presetId = typeof config.persona?.preset === 'string' ? config.persona.preset : null
+  if (typeof input?.preset === 'string') {
+    presetId = findPersonaPreset(input.preset)?.id ?? null
+  } else if (input?.preset === null) {
+    presetId = null
+  }
+  config.persona = { ...config.persona, jung, preset: presetId }
   config.updatedAt = new Date().toISOString()
   await writeConfigData(config)
-  return jung
+  return { jung, preset: presetId }
 }
 
-function pole(value, negative, positive) {
-  if (value <= -25) return negative
-  if (value >= 25) return positive
-  return '居中'
+/**
+ * Consolidation model settings.
+ *
+ * Defaults to null/undefined rather than a hardcoded model: `llm.stream`
+ * requires a real provider id (S6), so an unset value means "let the caller
+ * decide" and consolidation falls back to the heuristic extractor.
+ */
+async function readConsolidationModel() {
+  const config = await readConfigData()
+  const memory = config.memory ?? {}
+  const provider = typeof memory.consolidationProvider === 'string' ? memory.consolidationProvider : null
+  const model = typeof memory.consolidationModel === 'string' ? memory.consolidationModel : null
+  return { provider, model }
+}
+
+/**
+ * 倾向清晰度分档。
+ * 依据 MBTI 官方对 preference clarity 的说明：荣格体系是分类工具而非测量工具，
+ * 分数不表示「有多少」某种偏好，而表示这组对立项被选择得有多明确、多一致，
+ * 即所报告偏好是真实偏好的可能性。官方分档为 Slight / Moderate / Clear / Very Clear，
+ * 其中 Moderate 与 Clear 最常见，Slight 也不少见（[Clarifying Clarity](https://www.themyersbriggs.com/en-US/Access-Resources/Articles/clarifying-clarity)）。
+ */
+function clarityBand(value) {
+  const magnitude = Math.abs(value)
+  if (magnitude <= 15) return 'slight'
+  if (magnitude <= 45) return 'moderate'
+  if (magnitude <= 75) return 'clear'
+  return 'very-clear'
+}
+
+const CLARITY_HINT = {
+  slight: '两侧都用，边界模糊，别把任一侧说成定论',
+  moderate: '有倾向但不固执，可按情境调整',
+  clear: '多数时候如此，例外要说明',
+  'very-clear': '一贯如此，可作为稳定默认',
+}
+
+const JUNG_DESCRIPTORS = {
+  energy: { negative: '内向，先观察再表达', positive: '外向，主动交流' },
+  information: { negative: '实感，重视事实与细节', positive: '直觉，重视模式与可能性' },
+  decisions: { negative: '思考，先看逻辑一致性', positive: '情感，先照顾人的感受' },
+  lifestyle: { negative: '感知，保持开放与探索', positive: '判断，喜欢计划与收束' },
+}
+
+const JUNG_LABELS = {
+  energy: '能量来源',
+  information: '信息获取',
+  decisions: '决策方式',
+  lifestyle: '生活方式',
+}
+
+/**
+ * 人格配置的结构一致性检查。
+ *
+ * 只做确定性判断，不调 LLM：检查的是「这组取值注入后会给出自洽的语气吗」。
+ * 返回的每条提示都对应一个用户可以自己改的配置项，而不是抽象评分。
+ */
+function personaAudit(persona) {
+  const notes = []
+  const jung = persona?.jung ?? {}
+  const axes = JUNG_AXES.map((axis) => ({ axis, value: jung[axis] }))
+  const extreme = axes.filter((item) => Math.abs(item.value) >= 90)
+  const centered = axes.filter((item) => Math.abs(item.value) <= 10)
+
+  if (extreme.length >= 3) {
+    notes.push({
+      level: 'warn',
+      text: `有 ${extreme.length} 个轴接近极值（${extreme.map((item) => JUNG_LABELS[item.axis]).join('、')}），语气会非常单一，建议留出调整空间。`,
+    })
+  }
+  if (centered.length >= 3) {
+    notes.push({
+      level: 'info',
+      text: `有 ${centered.length} 个轴几乎居中（${centered.map((item) => JUNG_LABELS[item.axis]).join('、')}），人格接近默认语气。`,
+    })
+  }
+  // Extremes on opposite axes cancel each other: the prompt ends up asking for
+  // both terse and expansive answers in the same turn.
+  if (jung.decisions >= 80 && jung.lifestyle >= 80) {
+    notes.push({
+      level: 'warn',
+      text: '决策方式与生活方式同时很高，容易一边要求结论明确、一边要求保留多种可能；建议拉开一侧。',
+    })
+  }
+  if (jung.energy <= -80 && jung.information >= 80) {
+    notes.push({
+      level: 'info',
+      text: '内向与直觉同时很高，表现为想清楚再说但不急于展开；若希望更主动，调高能量来源。',
+    })
+  }
+  if (typeof persona.preset !== 'string' && Math.abs(jung.decisions) <= 10) {
+    notes.push({
+      level: 'info',
+      text: '未选择预设且决策方式居中，回答的直白程度不稳定；可以直接选一个预设作为基准。',
+    })
+  }
+  return notes
 }
 
 function personaPrompt(persona) {
-  return [
-    '你当前的人格倾向（荣格四轴，-100 到 100）：',
-    `- 能量来源：${pole(persona.energy, '偏内向，先观察再表达', '偏外向，主动交流')}`,
-    `- 信息获取：${pole(persona.information, '偏实感，重视事实与细节', '偏直觉，重视模式与可能性')}`,
-    `- 决策方式：${pole(persona.decisions, '偏思考，先看逻辑一致性', '偏情感，先照顾人的感受')}`,
-    `- 生活方式：${pole(persona.lifestyle, '偏判断，喜欢计划与收束', '偏感知，保持开放与探索')}`,
-    '让这些倾向影响语气和判断，但不要向用户声明类型标签，也不要把倾向当作事实或借口。',
-  ].join('\n')
+  const lines = ['你的人格倾向（荣格四轴；分数只表示倾向清晰度，不表示强弱）：']
+  for (const axis of JUNG_AXES) {
+    const value = persona.jung[axis]
+    const descriptor = value < 0 ? JUNG_DESCRIPTORS[axis].negative : JUNG_DESCRIPTORS[axis].positive
+    const band = clarityBand(value)
+    lines.push(
+      `- ${JUNG_LABELS[axis]}：偏${descriptor}（清晰度 ${band}：${CLARITY_HINT[band]}）`,
+    )
+  }
+  const preset =
+    typeof persona.preset === 'string' ? findPersonaPreset(persona.preset) : undefined
+  if (preset !== undefined) {
+    lines.push(`你的人格预设是「${preset.name}」，风格要求：`)
+    for (const rule of preset.style) lines.push(`- ${rule}`)
+  }
+  lines.push(
+    '用这些倾向调节语气和判断；不要向用户声明类型标签，也不要把清晰度说成能力高低。',
+  )
+  return lines.join('\n')
+}
+
+function normalizePersonaText(input) {
+  const text = typeof input === 'string' ? input.trim() : DEFAULT_PERSONA_TEXT
+  if (text === '') return DEFAULT_PERSONA_TEXT
+  return text.slice(0, PERSONA_TEXT_LIMIT)
+}
+
+async function readPersonaText() {
+  const config = await readConfigData()
+  return normalizePersonaText(config.persona?.text)
+}
+
+async function writePersonaText(input) {
+  const config = await readConfigData()
+  const text = normalizePersonaText(input?.text)
+  config.persona = { ...config.persona, text }
+  config.updatedAt = new Date().toISOString()
+  await writeConfigData(config)
+  return text
 }
 
 function withMemoryLock(task) {
@@ -444,7 +644,9 @@ function normalizeMemoryInput(input) {
   const tags = Array.isArray(input.tags)
     ? input.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '').slice(0, 12)
     : []
-  return { text, kind, tags }
+  // Provenance drives trust; the model's own confidence is not trusted (S6).
+  const source = MEMORY_SOURCES.has(input.source) ? input.source : 'agent-inferred'
+  return { text, kind, tags, source }
 }
 
 function memoryTerms(query) {
@@ -552,7 +754,9 @@ function memoryTools() {
         render: (value) => [{ type: 'text', text: `记得了：${value.text}` }],
       },
       execute: async (input) => {
-        const entry = await saveMemory(input)
+        // The agent only calls this when the user asked to remember something,
+        // so it is explicit provenance rather than an inference.
+        const entry = await saveMemory({ ...input, source: 'user-explicit' })
         return { id: entry.id, text: entry.text }
       },
     },
@@ -584,30 +788,67 @@ function memoryTools() {
         )
         return entries.length === 0
           ? '没有找到相关记忆。'
-          : entries.map((entry) => `- [${entry.kind}] ${entry.text}`).join('\n')
+          : entries.map((entry) => `- [${entry.id}] [${entry.kind}] ${entry.text}`).join('\n')
       },
     },
     {
       name: 'memory_forget',
-      description: 'Delete one Baibao memory by id when the user asks to forget it.',
+      description:
+        'Delete one Baibao memory when the user asks to forget it. Prefer the id returned by memory_search; if only a text fragment is known, pass it as `text` and the closest match is deleted.',
       parameters: {
         type: 'object',
-        properties: { id: { type: 'string' } },
-        required: ['id'],
+        properties: {
+          id: { type: 'string', description: 'Memory id from memory_search.' },
+          text: { type: 'string', description: 'Text fragment, used when no id is known.' },
+        },
         additionalProperties: false,
       },
       output: {
         schema: {
           type: 'object',
-          properties: { deleted: { type: 'boolean' } },
+          properties: {
+            deleted: { type: 'boolean' },
+            id: { type: 'string' },
+            text: { type: 'string' },
+          },
           required: ['deleted'],
           additionalProperties: false,
         },
-        render: (value) => [{ type: 'text', text: value.deleted ? '已删除。' : '没有找到该记忆。' }],
+        render: (value) => [
+          {
+            type: 'text',
+            text: value.deleted ? `已删除：${value.text ?? ''}` : '没有找到该记忆。',
+          },
+        ],
       },
-      execute: async (input) => ({ deleted: await deleteMemory(input.id) }),
+      execute: async (input) => {
+        const id = typeof input?.id === 'string' && input.id.trim() !== '' ? input.id.trim() : null
+        if (id !== null) {
+          const removed = await deleteMemory(id)
+          if (removed) return { deleted: true, id }
+          // An unknown id falls through to the text path rather than failing.
+        }
+        const fragment = typeof input?.text === 'string' ? input.text.trim() : ''
+        if (fragment === '') return { deleted: false }
+        const match = await findMemoryByText(fragment)
+        if (match === null) return { deleted: false }
+        await deleteMemory(match.id)
+        return { deleted: true, id: match.id, text: match.text }
+      },
     },
   ]
+}
+
+/** Closest memory for a free-text fragment, or null when nothing matches. */
+async function findMemoryByText(fragment) {
+  const entries = await listMemory(fragment)
+  if (entries.length > 0) return entries[0]
+  const needle = normalizeMemoryText(fragment)
+  if (needle === '') return null
+  for (const entry of await listMemory()) {
+    if (normalizeMemoryText(entry.text).includes(needle)) return entry
+  }
+  return null
 }
 
 function normalizeMemoryText(value) {
@@ -634,8 +875,14 @@ function extractMemoryCandidate(text) {
   const preference = cleaned.match(
     /(我(?:喜欢|偏好|讨厌|不喜欢|希望|想要|习惯|总是|通常)[^。！？!?\n]{2,160})/,
   )
+  // Stable first-person facts: "我的猫叫年糕", "我的项目代号是百宝". These are
+  // the L1 statements the memory design asks for; without them only explicit
+  // instructions and stated preferences ever reach the store.
+  const attribute = cleaned.match(
+    /(我(?:的|们的是|家|目前在|现在在|做的是)[^。！？!?\n]{1,40}(?:是|叫|为|属于)[^。！？!?\n]{2,120})/,
+  )
   const boundary = cleaned.match(/((?:不要|别)[^。！？!?\n]{2,160})/)
-  const raw = (explicit?.[1] ?? preference?.[1] ?? boundary?.[1])?.trim()
+  const raw = (explicit?.[1] ?? preference?.[1] ?? attribute?.[1] ?? boundary?.[1])?.trim()
   if (raw === undefined || raw.length < 4) return null
   const value = raw.replace(/[。！？!?]+$/, '').trim()
   const kind = /喜欢|偏好|讨厌|不喜欢|希望|想要|习惯|不要|别/.test(value)
@@ -646,20 +893,229 @@ function extractMemoryCandidate(text) {
 
 const lastConsolidatedTurns = new Map()
 
-async function consolidateAgent(ctx, agent) {
+/**
+ * Latest user message of the current turn, or null when unavailable.
+ * `sessionQuery.readSurface` is already used by consolidation, so its shape is
+ * known; anything unexpected degrades to null instead of throwing.
+ */
+async function readLatestUserMessage(ctx, agent) {
   const query = ctx.get('sessionQuery')
-  if (query === undefined || baibaoWorkspacePath === null) return
-  const cwd = agent.session?.header?.cwd
-  if (typeof cwd !== 'string' || normalizePath(cwd) !== normalizePath(baibaoWorkspacePath)) {
-    return
+  if (query === undefined) return null
+  try {
+    const surface = await query.readSurface(agent.id)
+    const users = (surface?.events ?? []).filter((event) => event.type === 'user/message')
+    const latest = users[users.length - 1]
+    return latest === undefined ? null : messageText(latest.data)
+  } catch {
+    return null
   }
-  const surface = await query.readSurface(agent.id)
-  const users = surface.events.filter((event) => event.type === 'user/message')
-  const latest = users[users.length - 1]
-  if (latest === undefined) return
-  const candidate = extractMemoryCandidate(messageText(latest.data))
-  if (candidate === null) return
-  await saveMemory(candidate)
+}
+
+/** Newest-first user messages of this agent's surface, capped. */
+async function readRecentUserMessages(ctx, agent, limit = 6) {
+  const query = ctx.get('sessionQuery')
+  if (query === undefined) return []
+  try {
+    const surface = await query.readSurface(agent.id)
+    const users = (surface?.events ?? []).filter((event) => event.type === 'user/message')
+    return users
+      .slice(-limit)
+      .map((event) => messageText(event.data).trim())
+      .filter((text) => text !== '')
+      .reverse()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Refresh the memory section from a query.
+ *
+ * Falls back to the recent list when the query yields nothing, so a turn about
+ * something unrelated still gets the same context a fresh agent would.
+ */
+async function refreshMemorySection(agentCtx, query) {
+  const results = query === '' ? [] : await searchMemory(query, 8)
+  const entries = results.length > 0 ? results : await listMemory()
+  if (entries.length === 0) return
+  try {
+    agentCtx.systemPrompt.section({
+      name: 'baibao-memory-context',
+      order: 60,
+      text: renderMemoryContext(entries),
+    })
+  } catch {
+    // A resumed agent may already own the section in this scope.
+  }
+}
+
+/** True when the agent's session lives in the Baibao workspace. */
+function isBaibaoAgent(agent, workspacePath) {
+  if (workspacePath === null) return false
+  const cwd = agent?.session?.header?.cwd
+  if (typeof cwd !== 'string') return false
+  return normalizePath(cwd) === normalizePath(workspacePath)
+}
+
+/**
+ * Consolidation prompt.
+ *
+ * Two constraints come straight from the S6 measurements, not guesswork:
+ * - the model drifted to English once in ten runs, so the language is pinned
+ *   and every extracted text is CJK-checked before it can be stored;
+ * - `confidence` was 0.9–0.95 for almost every entry, so it is ignored here and
+ *   trust is assigned by provenance instead (see `SOURCE_TRUST`).
+ */
+const CONSOLIDATION_INSTRUCTION = [
+  '你是百宝的记忆整理器。从对话中提取关于用户的**长期**事实。',
+  '',
+  '只输出 JSON，不要解释，不要 Markdown 代码围栏：',
+  '{"facts":[{"text":"一句独立完整的话","kind":"fact|preference","tags":["可选标签"]}]}',
+  '没有值得记住的内容时输出 {"facts":[]}。',
+  '',
+  '规则：',
+  '- 所有 text 必须用简体中文，不要翻译成英文。',
+  '- 只记跨会话仍然成立的信息：身份、稳定偏好、长期在做的项目、明确约定。',
+  '- 不要记一次性请求、当前任务的中间状态、助手自己的回复内容。',
+  '- 每条 text 独立成句，不依赖上下文也能读懂。',
+  '- 最多 8 条，挑最重要的。',
+].join('\n')
+
+/** Provenance-based trust; the model's own confidence is not used (see S6). */
+const SOURCE_TRUST = {
+  'user-explicit': 0.95,
+  'agent-inferred': 0.6,
+}
+
+/** A stored entry may carry provenance; older entries default to inferred. */
+function trustOf(entry) {
+  const source = typeof entry?.source === 'string' ? entry.source : null
+  return source === null ? SOURCE_TRUST['agent-inferred'] : (SOURCE_TRUST[source] ?? 0.6)
+}
+
+function hasCjk(text) {
+  return /[\u3400-\u9fff]/.test(text)
+}
+
+/** Strip an optional code fence, then parse. Returns null when unusable. */
+function parseConsolidationReply(raw) {
+  if (typeof raw !== 'string') return null
+  const unfenced = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+  let parsed
+  try {
+    parsed = JSON.parse(unfenced)
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== 'object' || !Array.isArray(parsed.facts)) return null
+  const facts = []
+  for (const item of parsed.facts) {
+    if (item === null || typeof item !== 'object') continue
+    const text = typeof item.text === 'string' ? item.text.trim() : ''
+    if (text === '' || text.length > 400) continue
+    // S6 saw one English reply in ten; drop non-Chinese text rather than let
+    // the store become a mix of languages.
+    if (!hasCjk(text)) continue
+    const kind = MEMORY_KINDS.has(item.kind) ? item.kind : 'fact'
+    const tags = Array.isArray(item.tags)
+      ? item.tags
+          .filter((tag) => typeof tag === 'string' && tag.trim() !== '')
+          .slice(0, 6)
+      : []
+    facts.push({ text, kind, tags })
+    if (facts.length >= 8) break
+  }
+  return facts
+}
+
+/**
+ * Call `llm.stream` and return the consolidated facts, or null when the model
+ * is unavailable or the reply is unusable.
+ *
+ * The API shape here is what S6 verified; see plan-tech/spikes.md §S6.
+ */
+async function extractFactsWithLlm(ctx, conversation, options = {}) {
+  const llm = ctx.get('llm')
+  if (llm === undefined || typeof llm.stream !== 'function') return null
+  // `llm.stream` rejects a missing provider with NO_ADAPTER (S6), so an unset
+  // model means "decline" rather than "try and fail".
+  const provider = typeof options.provider === 'string' ? options.provider : null
+  const model = typeof options.model === 'string' ? options.model : null
+  if (provider === null || model === null) return null
+  const prompt = [CONSOLIDATION_INSTRUCTION, '', '对话：', ...conversation].join('\n')
+  let stream
+  try {
+    stream = await llm.stream({
+      provider,
+      model,
+      purpose: 'dsh-baibao: memory consolidation',
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+    })
+  } catch {
+    return null
+  }
+  let text = ''
+  let stopped = false
+  try {
+    for await (const chunk of stream) {
+      if (chunk?.type === 'block-end' && typeof chunk.block?.text === 'string') {
+        text = chunk.block.text
+      } else if (chunk?.type === 'finish') {
+        // Model-layer failures arrive here, not as a thrown error.
+        stopped = chunk.reason?.kind === 'stop'
+      }
+    }
+  } catch {
+    return null
+  }
+  if (!stopped) return null
+  return parseConsolidationReply(text)
+}
+
+/**
+ * LLM-backed consolidation, falling back to the heuristic extractor when the
+ * model is unavailable so the explicit-memory loop keeps working.
+ *
+ * Returns the entries actually written, for logging and tests.
+ */
+async function consolidateAgent(ctx, agent, workspacePath = baibaoWorkspacePath, options = {}) {
+  if (!isBaibaoAgent(agent, workspacePath)) return []
+  // Scan the recent messages rather than only the last one: a preference is
+  // often stated across two messages ("别记这个" / "记住了，用简洁版").
+  const messages = await readRecentUserMessages(ctx, agent)
+  if (messages.length === 0) return []
+  const stored = new Set((await listMemory()).map((entry) => normalizeMemoryText(entry.text)))
+  const written = []
+
+  const facts = await extractFactsWithLlm(ctx, messages, options)
+  if (facts !== null) {
+    for (const fact of facts) {
+      const fingerprint = normalizeMemoryText(fact.text)
+      if (stored.has(fingerprint)) continue
+      const entry = await saveMemory({
+        ...fact,
+        source: 'agent-inferred',
+        tags: [...fact.tags, 'llm'],
+      })
+      stored.add(fingerprint)
+      written.push(entry)
+    }
+    return written
+  }
+
+  // Heuristic fallback: rule-based extraction over the same messages.
+  for (const text of messages) {
+    const candidate = extractMemoryCandidate(text)
+    if (candidate === null) continue
+    if (stored.has(normalizeMemoryText(candidate.text))) continue
+    const entry = await saveMemory(candidate)
+    stored.add(normalizeMemoryText(candidate.text))
+    written.push(entry)
+  }
+  return written
 }
 
 function renderMemoryContext(entries) {
@@ -704,36 +1160,31 @@ export function apply(ctx) {
       ctx.on('agent/created', function (payload) {
         const agent = payload.agent
         const agentCtx = agent?.ctx
-        const cwd = agent.session?.header?.cwd
-        if (
-          baibaoWorkspacePath === null ||
-          typeof cwd !== 'string' ||
-          normalizePath(cwd) !== normalizePath(baibaoWorkspacePath) ||
-          agentCtx === undefined
-        ) {
+        if (agentCtx === undefined || !isBaibaoAgent(agent, baibaoWorkspacePath)) {
           return
         }
         const presets = ctx.get('agentPresets')
         void (async () => {
-          let selected = presets?.composedPreset?.(agentCtx) === 'baibao'
-          if (!selected && typeof presets?.select === 'function') {
+          // Composing the preset is still worth doing: it brings the file and
+          // terminal tool rows. The persona text below is injected separately.
+          if (presets?.composedPreset?.(agentCtx) !== 'baibao' && typeof presets?.select === 'function') {
             try {
               await presets.select(agent, 'baibao')
-              selected = true
             } catch {
               // Closed sessions or a missing preset keep their current composition.
             }
           }
-          if (!selected) {
-            try {
-              agentCtx.systemPrompt.section({
-                name: 'baibao-persona',
-                order: 50,
-                text: PERSONA_TEXT,
-              })
-            } catch {
-              // A resumed agent may already own the section in this scope.
-            }
+          // Always inject: the persona text follows `config.persona.text`, so
+          // it must reach the agent whether the `baibao` preset composed or the
+          // fallback section path ran.
+          try {
+            agentCtx.systemPrompt.section({
+              name: 'baibao-persona',
+              order: 50,
+              text: await readPersonaText().catch(() => DEFAULT_PERSONA_TEXT),
+            })
+          } catch {
+            // A resumed agent may already own the section in this scope.
           }
           try {
             for (const tool of memoryTools()) {
@@ -742,19 +1193,24 @@ export function apply(ctx) {
           } catch {
             // A resumed agent may already own these tools in this scope.
           }
-          const entries = await listMemory()
-          if (entries.length > 0) {
+          // Seed the first turn with recent memories, then re-retrieve per turn
+          // from the user's actual message instead of a fixed recent list.
+          const seed = await listMemory()
+          if (seed.length > 0) {
             try {
               agentCtx.systemPrompt.section({
                 name: 'baibao-memory-context',
                 order: 60,
-                text: renderMemoryContext(entries),
+                text: renderMemoryContext(seed),
               })
             } catch {
               // A resumed agent may already own the section in this scope.
             }
           }
-          const persona = await readPersona().catch(() => ({ ...DEFAULT_JUNG }))
+          const persona = await readPersona().catch(() => ({
+            jung: { ...DEFAULT_JUNG },
+            preset: null,
+          }))
           try {
             agentCtx.systemPrompt.section({
               name: 'baibao-persona-tuning',
@@ -764,15 +1220,30 @@ export function apply(ctx) {
           } catch {
             // A resumed agent may already own the section in this scope.
           }
+          // One effect, two per-turn jobs: refresh memory for the next turn from
+          // the message just sent, then consolidate. Both are async and must not
+          // block the turn that is already stopping.
           agentCtx.effect(
             () =>
               agentCtx.on('agent/turn-stopping', (payload) => {
                 const previous = lastConsolidatedTurns.get(agent.id)
                 if (previous === payload.turn) return
                 lastConsolidatedTurns.set(agent.id, payload.turn)
-                void consolidateAgent(ctx, agent).catch(() => {})
+                void (async () => {
+                  const latest = await readLatestUserMessage(ctx, agent)
+                  if (latest !== null) {
+                    await refreshMemorySection(agentCtx, latest).catch(() => {})
+                  }
+                  // Without a configured model the LLM path declines and the
+                  // heuristic extractor runs instead, so nothing is lost.
+                  const model = await readConsolidationModel().catch(() => ({
+                    provider: null,
+                    model: null,
+                  }))
+                  await consolidateAgent(ctx, agent, undefined, model).catch(() => {})
+                })().catch(() => {})
               }),
-            'dsh-baibao: turn consolidation',
+            'dsh-baibao: turn memory',
           )
         })().catch(() => {})
       }),
@@ -954,14 +1425,35 @@ export function apply(ctx) {
           handler: async (request, response) => {
             try {
               if (request.method === 'GET') {
-                sendJson(response, 200, { ok: true, persona: await readPersona() })
+                const [persona, text] = await Promise.all([
+                  readPersona(),
+                  readPersonaText(),
+                ])
+                sendJson(response, 200, {
+                  ok: true,
+                  persona,
+                  text,
+                  defaultText: DEFAULT_PERSONA_TEXT,
+                  limit: PERSONA_TEXT_LIMIT,
+                  presets: PERSONA_PRESETS,
+                  audit: personaAudit(persona),
+                })
                 return
               }
 
               if (request.method === 'POST') {
                 const body = await readJson(request)
                 const persona = await writePersona(body)
-                sendJson(response, 200, { ok: true, persona })
+                const text = body?.text === undefined ? await readPersonaText() : await writePersonaText(body)
+                sendJson(response, 200, {
+                  ok: true,
+                  persona,
+                  text,
+                  defaultText: DEFAULT_PERSONA_TEXT,
+                  limit: PERSONA_TEXT_LIMIT,
+                  presets: PERSONA_PRESETS,
+                  audit: personaAudit(persona),
+                })
                 return
               }
 
@@ -976,6 +1468,339 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: persona route',
+    )
+
+    // TEMPORARY (S6): shape probe for the `llm` service. Removed once the real
+    // signature is recorded; it only reads and never mutates state.
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/spike/llm',
+          handler: async (request, response) => {
+            const url = new URL(request.url ?? '/', 'http://localhost')
+            const mode = url.searchParams.get('mode') ?? 'shape'
+            const llm = ctx.get('llm')
+            const report = { ok: true, present: llm !== undefined, mode }
+            const safe = (value) =>
+              JSON.parse(JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? String(v) : v)))
+            try {
+              if (llm === undefined) {
+                report.error = 'service-not-injected'
+              } else {
+                const proto = Object.getPrototypeOf(llm)
+                report.ownKeys = Object.keys(llm)
+                report.protoKeys = proto === null ? [] : Object.getOwnPropertyNames(proto)
+                for (const key of [...report.ownKeys, ...report.protoKeys]) {
+                  const value = llm[key]
+                  report[`typeof:${key}`] = typeof value
+                  if (typeof value === 'function') {
+                    report[`fn:${key}.length`] = value.length
+                    report[`fn:${key}.src`] = String(value).slice(0, 400)
+                  }
+                }
+                if (mode === 'providers') {
+                  for (const method of ['listProviders', 'listConfigurableProviders']) {
+                    if (typeof llm[method] !== 'function') continue
+                    try {
+                      const list = await llm[method]()
+                      report[method] = safe(list)
+                    } catch (error) {
+                      report[`${method}Error`] =
+                        error instanceof Error ? error.message : String(error)
+                    }
+                  }
+                }
+                if (mode === 'resolve' && typeof llm.prepareCall === 'function') {
+                  const provider = url.searchParams.get('provider') ?? 'nesercode-local-server'
+                  const model = url.searchParams.get('model') ?? 'cn:step-5-preview'
+                  const attempts = []
+                  const candidates = [
+                    { label: 'prompt', options: { prompt: 'ping', purpose: 'dsh-baibao-spike-s6' } },
+                    {
+                      label: 'messages',
+                      options: { messages: [{ role: 'user', content: 'ping' }], purpose: 'dsh-baibao-spike-s6' },
+                    },
+                    {
+                      label: 'contentBlocks',
+                      options: {
+                        messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+                        purpose: 'dsh-baibao-spike-s6',
+                      },
+                    },
+                    {
+                      label: 'messages+tools',
+                      options: {
+                        messages: [{ role: 'user', content: 'ping' }],
+                        tools: [],
+                        purpose: 'dsh-baibao-spike-s6',
+                      },
+                    },
+                  ]
+                  for (const candidate of candidates) {
+                    const entry = { label: candidate.label }
+                    // `signal?.throwIfAborted is not a function` means one
+                    // positional arg is an AbortSignal; try the plausible slots.
+                    const signal = AbortSignal.timeout(15000)
+                    for (const variant of [
+                      ['signal,provider,model,options', signal, provider, model, candidate.options],
+                      ['provider,model,options,signal', provider, model, candidate.options, signal],
+                      ['signal,options', signal, candidate.options],
+                      ['options,signal', candidate.options, signal],
+                      ['provider,model,options', provider, model, candidate.options],
+                      ['model,options', model, candidate.options],
+                      ['options', candidate.options],
+                    ]) {
+                      try {
+                        const result = await llm.prepareCall(...variant.slice(1))
+                        entry.ok = variant[0]
+                        entry.result = safe(result)
+                        break
+                      } catch (error) {
+                        entry[`err:${variant[0]}`] =
+                          error instanceof Error ? error.message : String(error)
+                      }
+                    }
+                    attempts.push(entry)
+                  }
+                  report.prepareCallAttempts = attempts
+                }
+                // Structured-output probe: the actual question S6 asks. Runs the
+                // same call N times and reports how many replies parse as the
+                // expected JSON schema.
+                if (mode === 'json' && typeof llm.stream === 'function') {
+                  const provider = url.searchParams.get('provider') ?? 'nesercode-local-server'
+                  const model = url.searchParams.get('model') ?? 'cn:fast-model'
+                  const rounds = Math.max(
+                    1,
+                    Math.min(20, Number(url.searchParams.get('rounds') ?? 5)),
+                  )
+                  // `case=empty` must yield an empty array; `case=chat` is the
+                  // realistic extraction; `case=lang` is the same call phrased in
+                  // Chinese to test whether it stops the language drift seen in
+                  // the first stability run.
+                  const scenario = url.searchParams.get('case') ?? 'chat'
+                  const instructions = {
+                    empty: [
+                      'Extract durable facts about the user from the conversation below.',
+                      'Reply with JSON only, no prose and no code fence:',
+                      '{"facts":[{"text":"...","kind":"fact|preference","confidence":0.9}]}',
+                      'Use an empty array when there is nothing worth remembering.',
+                      '',
+                      'Conversation:',
+                      'user: 帮我把这个函数改成异步的',
+                      'assistant: 已经改好了。',
+                      'user: 谢谢，再跑一下测试',
+                    ].join('\n'),
+                    chat: [
+                      'Extract durable facts about the user from the conversation below.',
+                      'Reply with JSON only, no prose and no code fence:',
+                      '{"facts":[{"text":"...","kind":"fact|preference","confidence":0.9}]}',
+                      'Use an empty array when there is nothing worth remembering.',
+                      '',
+                      'Conversation:',
+                      'user: 记住我喜欢喝美式咖啡，别加糖',
+                      'assistant: 好的，记住了。',
+                      'user: 我的猫叫年糕，三岁了',
+                    ].join('\n'),
+                    lang: [
+                      '从下面的对话中提取关于用户的长期事实。',
+                      '只输出 JSON，不要解释，不要代码围栏：',
+                      '{"facts":[{"text":"...","kind":"fact|preference","confidence":0.9}]}',
+                      '没有值得记住的内容时返回空数组。所有 text 必须用简体中文。',
+                      '',
+                      '对话：',
+                      'user: 记住我喜欢喝美式咖啡，别加糖',
+                      'assistant: 好的，记住了。',
+                      'user: 我的猫叫年糕，三岁了',
+                    ].join('\n'),
+                  }
+                  const instruction = instructions[scenario] ?? instructions.chat
+                  report.scenario = scenario
+                  const runs = []
+                  for (let index = 0; index < rounds; index += 1) {
+                    const started = Date.now()
+                    const run = { index }
+                    try {
+                      const stream = await llm.stream({
+                        provider,
+                        model,
+                        purpose: 'dsh-baibao-spike-s6',
+                        messages: [
+                          { role: 'user', content: [{ type: 'text', text: instruction }] },
+                        ],
+                      })
+                      let text = ''
+                      let finishKind = null
+                      let finishError = null
+                      let usage = null
+                      for await (const chunk of stream) {
+                        if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') {
+                          text += chunk.text
+                        } else if (
+                          chunk?.type === 'block-end' &&
+                          typeof chunk.block?.text === 'string'
+                        ) {
+                          text = chunk.block.text
+                        } else if (chunk?.type === 'usage') {
+                          usage = chunk.usage
+                        } else if (chunk?.type === 'finish') {
+                          finishKind = chunk.reason?.kind ?? null
+                          finishError = chunk.reason?.failure?.message ?? null
+                        }
+                      }
+                      run.elapsedMs = Date.now() - started
+                      run.finishKind = finishKind
+                      run.finishError = finishError
+                      run.usage = usage ?? null
+                      run.rawLength = text.length
+                      run.raw = text.slice(0, 600)
+                      // Language drift: the same prompt returned English once in
+                      // ten runs. Flag any reply with no CJK characters so the
+                      // consolidation prompt can be written to prevent it.
+                      run.hasCjk = /[\u3400-\u9fff]/.test(text)
+                      // Strip a code fence if the model added one, then parse.
+                      const unfenced = text
+                        .trim()
+                        .replace(/^```(?:json)?\s*/i, '')
+                        .replace(/\s*```$/, '')
+                      let parsed = null
+                      let parseError = null
+                      try {
+                        parsed = JSON.parse(unfenced)
+                      } catch (error) {
+                        parseError = error instanceof Error ? error.message : String(error)
+                      }
+                      run.parseError = parseError
+                      run.parsed = parsed
+                      run.valid =
+                        parsed !== null &&
+                        Array.isArray(parsed.facts) &&
+                        parsed.facts.every(
+                          (item) =>
+                            item !== null &&
+                            typeof item === 'object' &&
+                            typeof item.text === 'string' &&
+                            typeof item.kind === 'string',
+                        )
+                    } catch (error) {
+                      run.error = error instanceof Error ? error.message : String(error)
+                      run.valid = false
+                    }
+                    runs.push(run)
+                  }
+                  report.rounds = rounds
+                  report.runs = runs
+                  report.validCount = runs.filter((run) => run.valid === true).length
+                  report.successRate = runs.length === 0 ? 0 : report.validCount / runs.length
+                  report.cjkCount = runs.filter((run) => run.hasCjk === true).length
+                  report.avgElapsedMs = Math.round(
+                    runs.reduce((sum, run) => sum + (run.elapsedMs ?? 0), 0) /
+                      Math.max(1, runs.length),
+                  )
+                  const totalUsage = runs.reduce(
+                    (sum, run) => {
+                      const usage = run.usage ?? {}
+                      return {
+                        inputTokens: sum.inputTokens + (usage.inputTokens ?? 0),
+                        outputTokens: sum.outputTokens + (usage.outputTokens ?? 0),
+                        totalTokens: sum.totalTokens + (usage.totalTokens ?? 0),
+                      }
+                    },
+                    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+                  )
+                  report.totalUsage = totalUsage
+                  report.avgTokensPerRun = Math.round(totalUsage.totalTokens / Math.max(1, runs.length))
+                }
+                if (mode === 'models' && typeof llm.listModels === 'function') {
+                  const provider = url.searchParams.get('provider')
+                  const models =
+                    provider === null ? await llm.listModels() : await llm.listModels(provider)
+                  report.modelsType = Array.isArray(models) ? 'array' : typeof models
+                  report.models = safe(models)
+                }
+                if (mode === 'call' && typeof llm.stream === 'function') {
+                  const started = Date.now()
+                  const chunks = []
+                  const provider = url.searchParams.get('provider')
+                  const model = url.searchParams.get('model')
+                  const prompt = url.searchParams.get('prompt') ?? 'Reply with the single word: pong'
+                  const shape = url.searchParams.get('shape') ?? 'prompt'
+                  const base = { purpose: 'dsh-baibao-spike-s6' }
+                  if (provider !== null) base.provider = provider
+                  if (model !== null) base.model = model
+                  // Candidate GenerateOptions shapes. Each error narrowed the
+                  // next guess: `messages` is the right field, and its `content`
+                  // must be an array of blocks, not a plain string.
+                  const shapes = {
+                    prompt: { ...base, prompt },
+                    messages: { ...base, messages: [{ role: 'user', content: prompt }] },
+                    input: { ...base, input: [{ role: 'user', content: prompt }] },
+                    tools: { ...base, prompt, tools: [] },
+                    messagesTools: {
+                      ...base,
+                      messages: [{ role: 'user', content: prompt }],
+                      tools: [],
+                    },
+                    contentBlocks: {
+                      ...base,
+                      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+                    },
+                    contentBlocksTools: {
+                      ...base,
+                      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+                      tools: [],
+                    },
+                  }
+                  const options = shapes[shape] ?? shapes.prompt
+                  report.requestShape = shape
+                  report.requestOptions = options
+                  let stream
+                  try {
+                    stream = await llm.stream(options)
+                  } catch (error) {
+                    report.callError = error instanceof Error ? error.message : String(error)
+                  }
+                  if (stream !== undefined) {
+                    report.streamType = typeof stream
+                    report.streamIsArray = Array.isArray(stream)
+                    report.streamKeys =
+                      stream === null || typeof stream !== 'object' ? null : Object.keys(stream)
+                    // The return may be an async iterator, a sync iterator, or a
+                    // plain value. Probe all three: silently reporting zero
+                    // chunks would defeat the point of the spike.
+                    const iterable =
+                      stream !== null &&
+                      typeof stream === 'object' &&
+                      (typeof stream[Symbol.asyncIterator] === 'function' ||
+                        typeof stream[Symbol.iterator] === 'function')
+                    report.iterable = iterable
+                    if (iterable) {
+                      try {
+                        for await (const chunk of stream) {
+                          chunks.push(safe(chunk))
+                          if (chunks.length >= 20) break
+                        }
+                      } catch (error) {
+                        report.iterateError =
+                          error instanceof Error ? error.message : String(error)
+                      }
+                    }
+                    report.chunkCount = chunks.length
+                    report.chunks = chunks
+                  }
+                  report.elapsedMs = Date.now() - started
+                }
+              }
+            } catch (error) {
+              report.ok = false
+              report.error = error instanceof Error ? error.message : String(error)
+              report.stack = error instanceof Error ? error.stack?.slice(0, 800) : undefined
+            }
+            sendJson(response, 200, report)
+          },
+        }),
+      'dsh-baibao: s6 llm probe',
     )
 
     hostCtx.effect(
@@ -1039,5 +1864,80 @@ export function apply(ctx) {
       'dsh-baibao: chat start route',
     )
 
+    // Consolidation model settings plus the models actually available, so the
+    // panel can offer real choices instead of a free-text field.
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/config',
+          handler: async (request, response) => {
+            try {
+              const llm = ctx.get('llm')
+              const available =
+                llm !== undefined && typeof llm.listProviders === 'function'
+                  ? await llm.listProviders()
+                  : []
+              const models = []
+              for (const provider of available) {
+                if (typeof llm.listModels !== 'function') break
+                try {
+                  const list = await llm.listModels(provider.id)
+                  for (const model of list) {
+                    models.push({
+                      provider: provider.id,
+                      providerName: provider.name ?? provider.id,
+                      id: model.id,
+                      name: model.name ?? model.id,
+                    })
+                  }
+                } catch {
+                  // A provider without a working adapter is simply not offered.
+                }
+              }
+              if (request.method === 'GET') {
+                const current = await readConsolidationModel()
+                sendJson(response, 200, {
+                  ok: true,
+                  consolidation: current,
+                  models,
+                })
+                return
+              }
+              if (request.method === 'POST') {
+                const body = await readJson(request)
+                const config = await readConfigData()
+                const memory = { ...(config.memory ?? {}) }
+                const provider = typeof body?.provider === 'string' ? body.provider.trim() : ''
+                const model = typeof body?.model === 'string' ? body.model.trim() : ''
+                if (provider === '' || model === '') {
+                  delete memory.consolidationProvider
+                  delete memory.consolidationModel
+                } else {
+                  memory.consolidationProvider = provider
+                  memory.consolidationModel = model
+                }
+                config.memory = memory
+                config.updatedAt = new Date().toISOString()
+                await writeConfigData(config)
+                sendJson(response, 200, {
+                  ok: true,
+                  consolidation: await readConsolidationModel(),
+                  models,
+                })
+                return
+              }
+              response.writeHead(405, { allow: 'GET, POST' })
+              response.end()
+            } catch (error) {
+              sendJson(response, 500, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        }),
+      'dsh-baibao: config route',
+    )
   })
 }
