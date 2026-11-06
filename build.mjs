@@ -54,6 +54,35 @@ async function writeIfChanged(path, content) {
 }
 
 /**
+ * Bundle the host half.
+ *
+ * The host is Node ESM and used to be a single self-contained file, so the
+ * build simply copied it. Now that it imports `./host/*`, the copy would leave
+ * those relative imports pointing at files that do not exist under `lib/`.
+ *
+ * `packages: 'external'` keeps `node:*` and any bare package specifier out of
+ * the bundle — the host runtime supplies those — while relative modules are
+ * inlined.
+ */
+async function buildHost() {
+  const result = await build({
+    entryPoints: [HOST_ENTRY],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    packages: 'external',
+    legalComments: 'none',
+    sourcemap: false,
+    charset: 'utf8',
+  })
+  const [hostBundle] = result.outputFiles
+  if (hostBundle === undefined) throw new Error('esbuild produced no output for ' + HOST_ENTRY)
+  return hostBundle.text
+}
+
+/**
  * Run one complete client + host build.
  * @returns {Promise<boolean>} whether any output changed.
  */
@@ -97,14 +126,17 @@ async function buildOnce() {
 
   await mkdir('lib', { recursive: true })
   const clientChanged = await writeIfChanged(CLIENT_OUT, body)
-  const hostSource = await readFile(HOST_ENTRY, 'utf8')
+  const hostSource = await buildHost()
   const hostChanged = await writeIfChanged(HOST_OUT, hostSource)
 
   const bytes = Buffer.byteLength(body, 'utf8')
+  const hostBytes = Buffer.byteLength(hostSource, 'utf8')
   console.log(
     `${CLIENT_OUT}  ${(bytes / 1024).toFixed(1)} KiB${clientChanged ? '' : '  (unchanged)'}`,
   )
-  console.log(`${HOST_OUT}   ${hostChanged ? 'updated' : 'unchanged'}`)
+  console.log(
+    `${HOST_OUT}   ${(hostBytes / 1024).toFixed(1)} KiB${hostChanged ? '' : '  (unchanged)'}`,
+  )
   return clientChanged || hostChanged
 }
 
