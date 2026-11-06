@@ -36,6 +36,14 @@ export function registerSpikeRoutes(ctx, hostCtx) {
                 report.listError = error instanceof Error ? error.message : String(error)
               }
             }
+            for (const method of ['catalog', 'deliveryLimits']) {
+              if (typeof schedule[method] !== 'function') continue
+              try {
+                report[method] = JSON.parse(JSON.stringify(await schedule[method]()))
+              } catch (error) {
+                report[`${method}Error`] = error instanceof Error ? error.message : String(error)
+              }
+            }
             sendJson(response, 200, report)
           },
         }),

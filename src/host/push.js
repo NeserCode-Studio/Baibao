@@ -15,11 +15,13 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { readConfigData } from './config.js'
 import { rootFile } from './paths.js'
 
 const NOTIFICATION_STATUSES = new Set(['unread', 'read', 'dismissed', 'acted'])
 const NOTIFICATION_PRIORITIES = new Set(['P0', 'P1', 'P2'])
-const NOTIFICATION_SOURCES = new Set(['schedule', 'event', 'webhook', 'manual'])
+/** `agent` means the assistant chose to speak up, rather than a trigger firing. */
+const NOTIFICATION_SOURCES = new Set(['schedule', 'event', 'webhook', 'manual', 'agent'])
 
 /** Push settings default; overridable through `config.push`. */
 export const PUSH_DEFAULTS = {
@@ -196,6 +198,12 @@ export function ruleGate(event, settings, notifiedToday, now) {
   if (!NOTIFICATION_SOURCES.has(event?.source)) {
     return { sink: null, reason: 'unknown-source' }
   }
+  // Informational items never interrupt, so they are settled before the budget
+  // is consulted: reporting "over budget" for something that would not have
+  // interrupted anyway is a misleading reason.
+  if (priority === 'P2') {
+    return { sink: 'inbox', reason: 'informational' }
+  }
   // P0 is reserved for safety, failure and deadlines: it must not be muted.
   if (priority !== 'P0') {
     if (config.focusMode === true) {
@@ -209,9 +217,135 @@ export function ruleGate(event, settings, notifiedToday, now) {
       return { sink: 'inbox', reason: 'daily-budget' }
     }
   }
-  // Informational items never interrupt.
-  if (priority === 'P2') {
-    return { sink: 'inbox', reason: 'informational' }
-  }
   return { sink: 'notify', reason: 'noteworthy' }
 }
+
+/** Push settings from `config.push`, falling back to the defaults. */
+export async function readPushSettings() {
+  const config = await readConfigData()
+  return { ...PUSH_DEFAULTS, ...(config.push ?? {}) }
+}
+
+/** Local calendar day, so the daily budget resets at the user's midnight. */
+function localDay(date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+/**
+ * How many notifications that actually interrupted were sent today.
+ *
+ * Only `notify` decisions count against the budget; items that merely landed
+ * in the inbox were, by definition, not interruptions.
+ */
+export async function notifiedTodayCount(now = new Date()) {
+  const today = localDay(now)
+  const all = await listNotifications()
+  return all.filter(
+    (item) => item.decision === 'notify' && localDay(new Date(item.createdAt)) === today,
+  ).length
+}
+
+/**
+ * Run one candidate through the gate and store it when it may proceed.
+ *
+ * Returns the decision either way so the caller can explain what happened —
+ * a held-back notification is not an error.
+ */
+export async function deliverNotification(input, now = new Date()) {
+  const settings = await readPushSettings()
+  const decision = ruleGate(
+    { source: input.source ?? 'agent', priority: input.priority },
+    settings,
+    await notifiedTodayCount(now),
+    now,
+  )
+  if (decision.sink === null) {
+    return { delivered: false, sink: 'none', reason: decision.reason, id: null }
+  }
+  const entry = await saveNotification({
+    ...input,
+    source: input.source ?? 'agent',
+    decision: decision.sink,
+    reason: decision.reason,
+  })
+  return { delivered: true, sink: decision.sink, reason: decision.reason, id: entry.id }
+}
+
+/**
+ * The `notify_user` tool.
+ *
+ * The agent decides *whether* something is worth saying, since it holds the
+ * whole conversation; `ruleGate` still decides whether now is an acceptable
+ * moment. Keeping those two decisions separate means the agent cannot talk
+ * itself past quiet hours or the daily budget.
+ *
+ * The description leans hard on when not to use it: an inbox that pings for
+ * everything is worse than no inbox.
+ */
+export function pushTools() {
+  return [
+    {
+      name: 'notify_user',
+      description: [
+        'Send the user a short in-app notification when something genuinely needs their attention.',
+        'Good reasons: a long task finished with a result they asked for; something failed and needs their decision; a commitment has come due.',
+        'Bad reasons: small talk, restating what you just said in this conversation, anything they are already looking at.',
+        'When unsure, stay silent — the inbox is only useful if every entry mattered.',
+        'This posts to the in-app inbox. Respect quiet hours and the daily budget: the app enforces them, and may hold your message for later.',
+      ].join(' '),
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'One line: what happened.' },
+          body: {
+            type: 'string',
+            description: 'Why it matters now, and what (if anything) the user should do.',
+          },
+          priority: {
+            type: 'string',
+            enum: ['P0', 'P1', 'P2'],
+            description:
+              'P0 only for security, failure or a deadline (it pierces quiet hours). P1 for a decision or commitment. P2 for information that can wait.',
+          },
+        },
+        required: ['title', 'body'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            delivered: { type: 'boolean' },
+            sink: { type: 'string' },
+            reason: { type: 'string' },
+          },
+          required: ['delivered', 'sink', 'reason'],
+          additionalProperties: false,
+        },
+        render: (value) => [
+          {
+            type: 'text',
+            text: value.delivered
+              ? value.sink === 'notify'
+                ? '已通知用户。'
+                : '已放入收件箱（当前不宜打断）。'
+              : `未发送：${value.reason}`,
+          },
+        ],
+      },
+      execute: async (input) => {
+        const result = await deliverNotification({
+          title: input.title,
+          body: input.body,
+          // A direct call to this tool already means "worth saying", so the
+          // default is a normal notice rather than silent information.
+          priority: input.priority ?? 'P1',
+          source: 'agent',
+        })
+        return { delivered: result.delivered, sink: result.sink, reason: result.reason }
+      },
+    },
+  ]
+}
+
+
