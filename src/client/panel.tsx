@@ -1260,6 +1260,57 @@ function PushSettingsCard({ t }: { t: TranslateBaibao }) {
  * empty and an empty submit means "keep what is stored". That is why the hint
  * under the field says whether a secret already exists.
  */
+/** Small labelled field: the label sits above so long values never crowd it. */
+function Field({
+  label,
+  htmlFor,
+  hint,
+  children,
+}: {
+  label: string
+  htmlFor: string
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor={htmlFor}
+        className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+      >
+        {label}
+      </label>
+      {children}
+      {hint !== undefined && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Connection state as a dot plus a word.
+ *
+ * A filled colour block reads as a button and pulls the eye away from the
+ * settings; a dot carries the same signal at a fraction of the weight.
+ */
+function StatusPill({ state, label }: { state: string; label: string }) {
+  const tone =
+    state === 'ready'
+      ? 'bg-emerald-500'
+      : state === 'connecting' || state === 'reconnecting'
+        ? 'bg-amber-500'
+        : state === 'error' || state === 'fatal' || state === 'expired'
+          ? 'bg-red-500'
+          : 'bg-muted-foreground/40'
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+      <span className={cn('size-1.5 rounded-full', tone)} aria-hidden="true" />
+      {label}
+    </span>
+  )
+}
+
 function QqChannel({ t }: { t: TranslateBaibao }) {
   const [channel, setChannel] = useState<ChannelInfo | null>(null)
   const [status, setStatus] = useState<ChannelStatusEntry>({ state: 'unknown' })
@@ -1342,75 +1393,71 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           : 'channelStateIdle'
 
   return (
-    <div className="space-y-2 rounded-card border border-border bg-surface p-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-body font-semibold text-foreground">{t('channelQqTitle')}</span>
-        <span
-          role="status"
-          className={cn(
-            'rounded-full px-2 py-0.5 text-label font-semibold',
-            status.state === 'ready'
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-muted text-muted-foreground',
-          )}
+    <div className="rounded-xl border border-border bg-surface p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-[13px] font-semibold leading-tight text-foreground">
+            {t('channelQqTitle')}
+          </h3>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">{t('channelQqBody')}</p>
+        </div>
+        <StatusPill state={status.state} label={t(stateKey)} />
+      </div>
+
+      <div className="mt-4 space-y-3.5">
+        <Field label={t('channelAppId')} htmlFor="bb-qq-appid">
+          <Input
+            id="bb-qq-appid"
+            className="h-8 text-[12px]"
+            value={appId}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(event) => {
+              setAppId(event.target.value)
+              setPhase('ready')
+            }}
+          />
+        </Field>
+
+        <Field label={t('channelAppSecret')} htmlFor="bb-qq-secret">
+          <Input
+            id="bb-qq-secret"
+            type="password"
+            className="h-8 text-[12px]"
+            value={appSecret}
+            spellCheck={false}
+            autoComplete="new-password"
+            placeholder={channel?.hasSecret === true ? t('channelSecretStored') : ''}
+            onChange={(event) => {
+              setAppSecret(event.target.value)
+              setPhase('ready')
+            }}
+          />
+        </Field>
+
+        <Field
+          label={t('channelAllowedUsers')}
+          htmlFor="bb-qq-users"
+          hint={t('channelAllowedUsersBody')}
         >
-          {t(stateKey)}
-        </span>
-      </div>
-      <p className="text-label text-muted-foreground">{t('channelQqBody')}</p>
-
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
-        <label className="text-label text-muted-foreground" htmlFor="bb-qq-appid">
-          {t('channelAppId')}
-        </label>
-        <Input
-          id="bb-qq-appid"
-          value={appId}
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(event) => {
-            setAppId(event.target.value)
-            setPhase('ready')
-          }}
-        />
-
-        <label className="text-label text-muted-foreground" htmlFor="bb-qq-secret">
-          {t('channelAppSecret')}
-        </label>
-        <Input
-          id="bb-qq-secret"
-          type="password"
-          value={appSecret}
-          spellCheck={false}
-          autoComplete="new-password"
-          placeholder={channel?.hasSecret === true ? t('channelSecretStored') : ''}
-          onChange={(event) => {
-            setAppSecret(event.target.value)
-            setPhase('ready')
-          }}
-        />
-
-        <label className="text-label text-muted-foreground" htmlFor="bb-qq-users">
-          {t('channelAllowedUsers')}
-        </label>
-        <Input
-          id="bb-qq-users"
-          value={users}
-          spellCheck={false}
-          placeholder={t('channelAllowedUsersHint')}
-          onChange={(event) => {
-            setUsers(event.target.value)
-            setPhase('ready')
-          }}
-        />
+          <Input
+            id="bb-qq-users"
+            className="h-8 text-[12px]"
+            value={users}
+            spellCheck={false}
+            placeholder={t('channelAllowedUsersHint')}
+            onChange={(event) => {
+              setUsers(event.target.value)
+              setPhase('ready')
+            }}
+          />
+        </Field>
       </div>
 
-      <p className="text-label text-muted-foreground">{t('channelAllowedUsersBody')}</p>
-
-      <label className="flex cursor-pointer items-center gap-2 text-body text-foreground">
+      <label className="mt-4 flex cursor-pointer items-center gap-2 text-[12px] text-foreground">
         <input
           type="checkbox"
-          className="size-3.5 accent-[var(--bb-primary)]"
+          className="size-3.5 cursor-pointer accent-[var(--bb-primary)]"
           checked={enabled}
           onChange={(event) => {
             setEnabled(event.target.checked)
@@ -1420,31 +1467,35 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
         <span>{t('channelEnable')}</span>
       </label>
 
-      <div className="flex gap-2">
-        <Button onClick={submit} disabled={phase === 'loading' || phase === 'saving'}>
+      <div className="mt-4 flex items-center gap-2">
+        <Button
+          className="h-8 px-3.5 text-[12px]"
+          onClick={submit}
+          disabled={phase === 'loading' || phase === 'saving'}
+        >
           {t('consolidationSave')}
         </Button>
         {channel?.hasSecret === true && (
           <Button
-            variant="outline"
+            variant="ghost"
+            className="h-8 px-3 text-[12px]"
             onClick={() => void save({ clearSecret: true })}
             disabled={phase === 'loading' || phase === 'saving'}
           >
             {t('channelClearSecret')}
           </Button>
         )}
+        {phase === 'saved' && (
+          <span className="text-[11px] font-medium text-emerald-600" role="status">
+            {t('consolidationSaved')}
+          </span>
+        )}
+        {phase === 'error' && (
+          <span className="text-[11px] font-medium text-destructive" role="alert">
+            {t('channelFailed')}
+          </span>
+        )}
       </div>
-
-      {phase === 'saved' && (
-        <p className="text-label text-primary" role="status">
-          {t('consolidationSaved')}
-        </p>
-      )}
-      {phase === 'error' && (
-        <p className="text-label text-destructive" role="alert">
-          {t('channelFailed')}
-        </p>
-      )}
     </div>
   )
 }

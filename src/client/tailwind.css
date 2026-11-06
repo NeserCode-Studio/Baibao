@@ -4,31 +4,33 @@
  * The panel is embedded in the DSH shell, so the theme aliases point at the
  * shell's own design tokens rather than at fixed colours. When the shell
  * switches theme, these follow automatically.
+ *
+ * The aliases are declared on `:root` as well as `.bb-root`. The shell defines
+ * its `--dsw-alias-*` tokens at the document root, and a rule that resolves them
+ * from deeper in the tree silently produced empty colours — a card with no
+ * background and no border. Declaring at `:root` costs nothing (the names are
+ * `--bb-`prefixed, so nothing else reads them) and guarantees inheritance.
+ *
+ * Every alias carries a literal fallback: if a token is ever renamed upstream,
+ * the panel degrades to a readable colour instead of turning transparent.
  */
 @tailwind components;
 @tailwind utilities;
 
-/**
- * Theme aliases, declared as a plain rule rather than inside `@layer base`.
- *
- * `@tailwind base` is deliberately absent: it needs `@layer base` to pair with,
- * and it would also emit Tailwind's global scaffolding — the very thing that
- * must not reach the host shell. A normal scoped rule carries the variables just
- * as well.
- */
+:root,
 .bb-root {
   /* shadcn's vocabulary, aliased onto the shell's tokens. */
-  --bb-background: var(--dsw-alias-bg-base);
+  --bb-background: var(--dsw-alias-bg-base, #ffffff);
   --bb-foreground: var(--dsw-alias-label-primary, #1f2328);
-  --bb-surface: var(--dsw-alias-bg-layer-1);
-  --bb-border: var(--dsw-alias-border-l1);
-  --bb-muted: var(--dsw-alias-bg-layer-2);
+  --bb-surface: var(--dsw-alias-bg-layer-1, #ffffff);
+  --bb-border: var(--dsw-alias-border-l1, #d8dde3);
+  --bb-muted: var(--dsw-alias-bg-layer-2, #f2f4f6);
   --bb-muted-foreground: var(--dsw-alias-label-secondary, #5c6570);
   --bb-primary: var(--dsw-alias-brand-primary, #4f6ef7);
-  --bb-primary-foreground: var(--dsw-alias-bg-base, #fff);
-  --bb-destructive: var(--dsw-alias-label-error, #d93f3f);
-  --bb-destructive-foreground: #fff;
-  --bb-accent: var(--dsw-alias-bg-layer-2);
+  --bb-primary-foreground: var(--dsw-alias-bg-base, #ffffff);
+  --bb-destructive: var(--dsw-alias-state-error-primary, #d93f3f);
+  --bb-destructive-foreground: #ffffff;
+  --bb-accent: var(--dsw-alias-bg-layer-2, #f2f4f6);
   --bb-accent-foreground: var(--dsw-alias-label-primary, #1f2328);
-  --bb-ring: var(--dsw-alias-brand-primary, #4f6ef7);
+  --bb-ring: var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary, #4f6ef7));
 }
