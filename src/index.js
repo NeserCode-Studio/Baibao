@@ -35,40 +35,92 @@ let presetsReady = null
 // prefix: a stale copy would silently override the user's edits in the very
 // path that always composes this preset.
 /**
- * Decide whether a shell can be driven through a PTY on this machine.
+ * Resolve a command to a path that a PTY can actually execute.
  *
- * A plain `spawn` probe is NOT sufficient: PowerShell 7 installed from the
- * Store is a 0-byte app-execution-alias reparse point. `CreateProcess` follows
- * it, so a naive spawn check reports success, while conpty cannot execute it
- * and the PTY dies at startup. The reliable signal is therefore the file
- * itself: a zero-length reparse point is an alias, not a real executable.
+ * On Windows, PowerShell 7 installed from the Store only exposes a 0-byte
+ * app-execution-alias reparse point. `CreateProcess` follows it, but conpty
+ * cannot, so the PTY dies at startup. The real image does exist inside the
+ * MSIX package under `Program Files\WindowsApps` and is directly executable,
+ * so prefer that over the alias.
+ *
+ * `readdir` on `Program Files\WindowsApps` fails with EPERM for a normal
+ * process even though individual package paths are stat-able, so the package
+ * location is asked of AppX rather than discovered by listing.
+ *
+ * Returns null when no usable path exists.
  */
-async function isPtySafeShell(command) {
-  if (process.platform !== 'win32') return true
+async function resolvePtySafeExecutable(command) {
+  if (process.platform !== 'win32') return command
   const { execFile } = await import('node:child_process')
-  const resolved = await new Promise((resolve) => {
-    execFile('where', [command], (error, stdout) => {
-      resolve(
-        error
-          ? null
-          : stdout
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter((line) => line !== '')[0],
+  const { stat } = await import('node:fs/promises')
+
+  const where = async (cmd) =>
+    new Promise((resolve) => {
+      execFile('where', [cmd], (error, stdout) => {
+        resolve(
+          error
+            ? []
+            : stdout
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line !== ''),
+        )
+      })
+    })
+
+  const isRealImage = async (file) => {
+    try {
+      const info = await stat(file)
+      return info.size > 0
+    } catch {
+      return false
+    }
+  }
+
+  // A real image anywhere in the resolution order is usable as-is.
+  for (const candidate of await where(command)) {
+    if (await isRealImage(candidate)) return candidate
+  }
+
+  // Only aliases so far. A versioned alias such as
+  // ...\WindowsApps\Microsoft.PowerShell-LTS_8wekyb3d8bbwe\pwsh.exe names the
+  // backing package family; the real image sits at
+  // ...\Program Files\WindowsApps\<that family>\<version>_x64__<hash>\pwsh.exe.
+  // Listing Program Files\WindowsApps fails with EPERM, so ask AppX instead of
+  // enumerating it.
+  const families = new Set()
+  for (const candidate of await where(command)) {
+    const parent = path.basename(path.dirname(candidate))
+    const match = parent.match(/^([A-Za-z0-9._-]+)_8wekyb3d8bbwe$/)
+    if (match !== null) families.add(match[1])
+  }
+  for (const family of families) {
+    const locations = await new Promise((resolve) => {
+      execFile(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          `Get-AppxPackage -Name '${family}' | Select-Object -ExpandProperty InstallLocation`,
+        ],
+        (error, stdout) => {
+          resolve(
+            error
+              ? []
+              : stdout
+                  .split(/\r?\n/)
+                  .map((line) => line.trim())
+                  .filter((line) => line !== ''),
+          )
+        },
       )
     })
-  })
-  if (resolved === null) return false
-  const { stat } = await import('node:fs/promises')
-  try {
-    const info = await stat(resolved)
-    // An app-execution-alias stub is exactly 0 bytes and carries a reparse
-    // point; a genuine install has a real image on disk.
-    if (info.size === 0) return false
-    return true
-  } catch {
-    return false
+    for (const location of locations) {
+      const candidate = path.join(location, `${command}.exe`)
+      if (await isRealImage(candidate)) return candidate
+    }
   }
+  return null
 }
 
 /**
@@ -82,8 +134,8 @@ async function isPtySafeShell(command) {
  */
 async function resolveShellDialect() {
   if (process.platform !== 'win32') return 'bash'
-  const safe = await isPtySafeShell('pwsh')
-  return safe ? 'pwsh' : 'bash'
+  const executable = await resolvePtySafeExecutable('pwsh')
+  return executable === null ? 'bash' : 'pwsh'
 }
 
 function baibaoPlugins(shellDialect) {
@@ -1608,6 +1660,10 @@ export function apply(ctx) {
             report.powershell = await which('powershell')
             report.bash = await which('bash')
             report.wsl = await which('wsl')
+            // Resolve what a PTY could actually run, including the real image
+            // behind a Store alias.
+            report.ptySafePwsh = await resolvePtySafeExecutable('pwsh')
+            report.resolvedDialect = await resolveShellDialect()
             // The PATH DSH itself sees, so a mismatch with the shell is visible.
             report.path = (process.env.PATH ?? '').split(';').filter((p) => p !== '')
             report.hasWindowsApps = report.path.some((p) =>
