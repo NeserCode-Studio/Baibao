@@ -22,6 +22,7 @@ import { attachBaibaoAgent } from './host/agent-hook.js'
 import { defaultRoot, readLocation } from './host/paths.js'
 import { ensureBaibaoPreset } from './host/preset.js'
 import { registerChatRoutes } from './host/routes/chat.js'
+import { registerChannelRoutes } from './host/routes/channels.js'
 import { registerConfigRoutes } from './host/routes/config.js'
 import { registerMemoryRoutes } from './host/routes/memory.js'
 import { registerNotificationRoutes } from './host/routes/notifications.js'
@@ -89,6 +90,7 @@ export function apply(ctx) {
     registerNotificationRoutes(ctx, hostCtx)
     registerPersonaRoutes(ctx, hostCtx)
     registerConfigRoutes(ctx, hostCtx)
+    registerChannelRoutes(ctx, hostCtx)
     registerChatRoutes(ctx, hostCtx, {
       presetsReady: state.presetsReady,
       setWorkspacePath: (value) => {

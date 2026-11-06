@@ -21,6 +21,12 @@ import {
 } from './notifications-api'
 import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
 import {
+  getChannels,
+  saveChannel,
+  type ChannelInfo,
+  type ChannelStatusEntry,
+} from './channels-api'
+import {
   DEFAULT_JUNG,
   DEFAULT_JUNG_TEXT,
   getPersona,
@@ -768,6 +774,198 @@ function MemoryList({ t }: BaibaoPanelProps) {
   )
 }
 
+/**
+ * QQ bot connection form.
+ *
+ * The secret is write-only: the host never sends it back, so the field starts
+ * empty and an empty submit means "keep what is stored". That is why the hint
+ * under the field says whether a secret already exists.
+ */
+function QqChannel({ t }: { t: TranslateBaibao }) {
+  const [channel, setChannel] = useState<ChannelInfo | null>(null)
+  const [status, setStatus] = useState<ChannelStatusEntry>({ state: 'unknown' })
+  const [appId, setAppId] = useState('')
+  const [appSecret, setAppSecret] = useState('')
+  const [users, setUsers] = useState('')
+  const [enabled, setEnabled] = useState(false)
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading')
+
+  const applyChannel = (next: ChannelInfo): void => {
+    setChannel(next)
+    setAppId(next.appId)
+    setUsers(next.allowedUsers.join(', '))
+    setEnabled(next.enabled)
+    setAppSecret('')
+  }
+
+  useEffect(() => {
+    let live = true
+    void getChannels().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        const qq = result.channels.find((item) => item.id === 'qq')
+        if (qq !== undefined) applyChannel(qq)
+        setStatus(result.status.qq ?? { state: 'unknown' })
+        setPhase('ready')
+      } else {
+        setPhase('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async (patch: Parameters<typeof saveChannel>[1]): Promise<void> => {
+    setPhase('saving')
+    const result = await saveChannel('qq', patch)
+    if (result.ok) {
+      applyChannel(result.channel)
+      setPhase('saved')
+    } else {
+      setPhase('error')
+    }
+  }
+
+  const submit = (): void => {
+    void save({
+      enabled,
+      appId,
+      // Empty means "leave the stored secret alone".
+      ...(appSecret === '' ? {} : { appSecret }),
+      allowedUsers: users
+        .split(/[,，\s]+/)
+        .map((item) => item.trim())
+        .filter((item) => item !== ''),
+    })
+  }
+
+  const stateKey: BaibaoKey =
+    status.state === 'ready'
+      ? 'channelStateReady'
+      : status.state === 'connecting' || status.state === 'reconnecting'
+        ? 'channelStateConnecting'
+        : status.state === 'error' || status.state === 'fatal'
+          ? 'channelStateError'
+          : 'channelStateIdle'
+
+  return (
+    <div className="bb-channel">
+      <div className="bb-jungRowTop">
+        <span className="bb-jungBlockTitle">{t('channelQqTitle')}</span>
+        <span
+          className={status.state === 'ready' ? 'bb-channelStateOk' : 'bb-channelState'}
+          role="status"
+        >
+          {t(stateKey)}
+        </span>
+      </div>
+      <p className="bb-storageHint">{t('channelQqBody')}</p>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-qq-appid">
+          {t('channelAppId')}
+        </label>
+        <input
+          id="bb-qq-appid"
+          type="text"
+          className="bb-memorySearchInput"
+          value={appId}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => {
+            setAppId(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-qq-secret">
+          {t('channelAppSecret')}
+        </label>
+        <input
+          id="bb-qq-secret"
+          type="password"
+          className="bb-memorySearchInput"
+          value={appSecret}
+          spellCheck={false}
+          autoComplete="new-password"
+          placeholder={channel?.hasSecret === true ? t('channelSecretStored') : ''}
+          onChange={(event) => {
+            setAppSecret(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-qq-users">
+          {t('channelAllowedUsers')}
+        </label>
+        <input
+          id="bb-qq-users"
+          type="text"
+          className="bb-memorySearchInput"
+          value={users}
+          spellCheck={false}
+          placeholder={t('channelAllowedUsersHint')}
+          onChange={(event) => {
+            setUsers(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+
+      <p className="bb-storageHint">{t('channelAllowedUsersBody')}</p>
+
+      <label className="bb-channelToggle">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => {
+            setEnabled(event.target.checked)
+            setPhase('ready')
+          }}
+        />
+        <span>{t('channelEnable')}</span>
+      </label>
+
+      <div className="bb-personaActions">
+        <button
+          type="button"
+          className="bb-personaBtn"
+          onClick={submit}
+          disabled={phase === 'loading' || phase === 'saving'}
+        >
+          {t('consolidationSave')}
+        </button>
+        {channel?.hasSecret === true && (
+          <button
+            type="button"
+            className="bb-secondaryBtn"
+            onClick={() => void save({ clearSecret: true })}
+            disabled={phase === 'loading' || phase === 'saving'}
+          >
+            {t('channelClearSecret')}
+          </button>
+        )}
+      </div>
+
+      {phase === 'saved' && (
+        <p className="bb-storageOk" role="status">
+          {t('consolidationSaved')}
+        </p>
+      )}
+      {phase === 'error' && (
+        <p className="bb-storageError" role="alert">
+          {t('channelFailed')}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ConnectionsSection({ t, hidden }: SectionProps) {
   return (
     <section
@@ -778,6 +976,7 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
       hidden={hidden}
     >
       <SectionHead title={t('connectionsTitle')} body={t('connectionsBody')} />
+      <QqChannel t={t} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />
         <Card title={t('connectionsTriggerTitle')} body={t('connectionsTriggerBody')} badge={t('planned')} />
