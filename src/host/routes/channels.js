@@ -55,7 +55,23 @@ export function registerChannelRoutes(ctx, hostCtx) {
                 if (body.action === 'qr') {
                   try {
                     const code = await requestQrCode()
-                    sendJson(response, 200, { ok: true, qr: code })
+                    // The platform hands back a page URL, not an image; encode it
+                    // here so the panel can show something scannable.
+                    let image = ''
+                    if (code.url !== '') {
+                      try {
+                        const qrcode = await import('qrcode')
+                        image = await qrcode.default.toDataURL(code.url, {
+                          margin: 1,
+                          width: 320,
+                          errorCorrectionLevel: 'M',
+                        })
+                      } catch {
+                        // Without an encoder the URL is still shown as a link.
+                        image = ''
+                      }
+                    }
+                    sendJson(response, 200, { ok: true, qr: { qrcode: code.qrcode, image, url: code.url } })
                   } catch (error) {
                     sendJson(response, 200, {
                       ok: false,

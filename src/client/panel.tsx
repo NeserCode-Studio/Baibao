@@ -898,7 +898,14 @@ function WechatChannel({ t }: { t: TranslateBaibao }) {
 
       {qr !== null && (
         <div className="bb-channelQr">
-          {qr.image !== '' && <img src={qr.image} alt={t('channelWechatScan')} />}
+          {qr.image !== '' ? (
+            <img src={qr.image} alt={t('channelWechatScan')} />
+          ) : (
+            // Encoding can fail; the raw URL still works when opened elsewhere.
+            <a className="bb-storageHint" href={qr.url} target="_blank" rel="noreferrer">
+              {qr.url}
+            </a>
+          )}
           <p className="bb-storageHint">
             {qrState === 'scaned' ? t('channelWechatScanned') : t('channelWechatScan')}
           </p>

@@ -75,17 +75,20 @@ async function postJson(path, payload, token) {
 
 // ------------------------------------------------------------------ login
 
-/** Ask for a login QR code. The returned token identifies this login attempt. */
+/**
+ * Ask for a login QR code.
+ *
+ * `qrcode_img_content` is misleadingly named: it is the URL of a WeChat H5 page
+ * that renders the code with JavaScript, not an image. The caller has to encode
+ * that URL into a QR image itself, which is why `url` is returned raw here.
+ */
 export async function requestQrCode() {
   const result = await getJson(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=3`)
   if (!result.ok) throw new Error(`qrcode-http-${result.status}`)
   const qrcode = result.body?.qrcode
   if (typeof qrcode !== 'string' || qrcode === '') throw new Error('qrcode-malformed')
-  return {
-    qrcode,
-    // Either a URL or inline image content the panel can render directly.
-    image: typeof result.body?.qrcode_img_content === 'string' ? result.body.qrcode_img_content : '',
-  }
+  const url = typeof result.body?.qrcode_img_content === 'string' ? result.body.qrcode_img_content : ''
+  return { qrcode, url }
 }
 
 /** Normalise the login status poll. */

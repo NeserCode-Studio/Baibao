@@ -136,7 +136,10 @@ export interface QrState {
 
 export interface QrCode {
   qrcode: string
+  /** data URL of the rendered QR, empty when encoding failed. */
   image: string
+  /** The raw login URL, shown as a fallback link. */
+  url: string
 }
 
 export type QrResult = { ok: true; qr: QrCode } | { ok: false; error: string }
@@ -155,7 +158,7 @@ export async function requestWechatQr(): Promise<QrResult> {
     })
     const body = (await response.json()) as {
       ok?: boolean
-      qr?: { qrcode?: unknown; image?: unknown }
+      qr?: { qrcode?: unknown; image?: unknown; url?: unknown }
       error?: string
     }
     if (body.ok !== true || typeof body.qr?.qrcode !== 'string') {
@@ -163,7 +166,11 @@ export async function requestWechatQr(): Promise<QrResult> {
     }
     return {
       ok: true,
-      qr: { qrcode: body.qr.qrcode, image: typeof body.qr.image === 'string' ? body.qr.image : '' },
+      qr: {
+        qrcode: body.qr.qrcode,
+        image: typeof body.qr.image === 'string' ? body.qr.image : '',
+        url: typeof body.qr.url === 'string' ? body.qr.url : '',
+      },
     }
   } catch {
     return { ok: false, error: 'network' }
