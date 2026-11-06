@@ -82,7 +82,12 @@ export function sessionTools(ctx) {
         const controller = ctx.get('sessionController')
         if (controller === undefined) return '会话检索不可用。'
         try {
-          const result = await controller.search({ query: String(input.query ?? '') })
+          // The signature is search(request, signal); omitting the signal makes the
+          // call return an empty list rather than complain.
+          const result = await controller.search(
+            { query: String(input.query ?? '') },
+            AbortSignal.timeout(15_000),
+          )
           const items = Array.isArray(result?.items) ? result.items : []
           if (items.length === 0) return '没有找到相关的过往对话。'
           return items
@@ -106,7 +111,7 @@ export function sessionTools(ctx) {
         const controller = ctx.get('sessionController')
         if (controller === undefined) return '会话列表不可用。'
         try {
-          const result = await controller.list({})
+          const result = await controller.list({}, AbortSignal.timeout(15_000))
           const items = Array.isArray(result?.items) ? result.items : []
           if (items.length === 0) return '没有其他会话。'
           return items
