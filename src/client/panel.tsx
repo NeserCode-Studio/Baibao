@@ -26,8 +26,10 @@ import {
   pollWechatQr,
   requestWechatQr,
   saveChannel,
+  saveIdentity,
   type ChannelInfo,
   type ChannelStatusEntry,
+  type IdentityView,
   type QrCode,
 } from './channels-api'
 import {
@@ -968,6 +970,127 @@ function WechatChannel({ t }: { t: TranslateBaibao }) {
 }
 
 /**
+ * Bind the same person's two platform ids.
+ *
+ * Without the link the agent cannot tell that its QQ conversation and its
+ * WeChat conversation belong to one person, and will answer "I have no
+ * conversation with you there". The ids are long and meaningless, so the panel
+ * shows a masked form and treats an empty field as "leave it alone".
+ */
+function IdentityCard({ t }: { t: TranslateBaibao }) {
+  const [identity, setIdentity] = useState<IdentityView>({ qq: '', wechat: '', bound: false })
+  const [qq, setQq] = useState('')
+  const [wechat, setWechat] = useState('')
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'busy' | 'saved' | 'error'>('loading')
+
+  useEffect(() => {
+    let live = true
+    void getChannels().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setIdentity(result.identity)
+        setPhase('ready')
+      } else {
+        setPhase('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const submit = (): void => {
+    setPhase('busy')
+    void saveIdentity({
+      ...(qq === '' ? {} : { qq }),
+      ...(wechat === '' ? {} : { wechat }),
+    }).then((result) => {
+      if (result.ok) {
+        setIdentity(result.identity)
+        setQq('')
+        setWechat('')
+        setPhase('saved')
+      } else {
+        setPhase('error')
+      }
+    })
+  }
+
+  return (
+    <div className="bb-channel">
+      <div className="bb-jungRowTop">
+        <span className="bb-jungBlockTitle">{t('identityTitle')}</span>
+        <span className={identity.bound ? 'bb-channelStateOk' : 'bb-channelState'} role="status">
+          {identity.bound ? t('identityBound') : t('identityUnbound')}
+        </span>
+      </div>
+      <p className="bb-storageHint">{t('identityBody')}</p>
+
+      {identity.bound && (
+        <p className="bb-storageHint">
+          QQ <code>{identity.qq}</code> · 微信 <code>{identity.wechat}</code>
+        </p>
+      )}
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-id-qq">
+          QQ
+        </label>
+        <input
+          id="bb-id-qq"
+          type="text"
+          className="bb-memorySearchInput"
+          value={qq}
+          spellCheck={false}
+          autoComplete="off"
+          placeholder={identity.qq === '' ? t('identityPlaceholder') : identity.qq}
+          onChange={(event) => {
+            setQq(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-id-wx">
+          微信
+        </label>
+        <input
+          id="bb-id-wx"
+          type="text"
+          className="bb-memorySearchInput"
+          value={wechat}
+          spellCheck={false}
+          autoComplete="off"
+          placeholder={identity.wechat === '' ? t('identityPlaceholder') : identity.wechat}
+          onChange={(event) => {
+            setWechat(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+
+      <div className="bb-personaActions">
+        <button type="button" className="bb-personaBtn" onClick={submit} disabled={phase === 'busy'}>
+          {t('consolidationSave')}
+        </button>
+      </div>
+
+      {phase === 'saved' && (
+        <p className="bb-storageOk" role="status">
+          {t('consolidationSaved')}
+        </p>
+      )}
+      {phase === 'error' && (
+        <p className="bb-storageError" role="alert">
+          {t('channelFailed')}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * Push settings: when Baibao may interrupt, and how often.
  *
  * These were fixed at their documented defaults before; the rule gate honoured
@@ -1344,6 +1467,7 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
       <SectionHead title={t('connectionsTitle')} body={t('connectionsBody')} />
       <QqChannel t={t} />
       <WechatChannel t={t} />
+      <IdentityCard t={t} />
       <PushSettingsCard t={t} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />

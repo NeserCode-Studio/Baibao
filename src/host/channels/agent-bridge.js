@@ -19,6 +19,7 @@ import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { defaultRoot } from '../paths.js'
 import { CHANNEL_LABELS, channelTitle, setChannelContext } from './context.js'
+import { counterpartOf } from './store.js'
 
 /**
  * One live session per chat, so two people talking to the same bot do not read
@@ -73,15 +74,24 @@ async function declareChannel(controller, sessionId, channel, userId) {
   const prompt = resolved?.agent?.ctx?.systemPrompt
   if (prompt === undefined || typeof prompt.section !== 'function') return
   const label = CHANNEL_LABELS[channel] ?? channel
+  const counterpart = await counterpartOf(channel, userId).catch(() => null)
+  const lines = [
+    `你现在通过「${label}」和这位用户对话。`,
+    `用户在这个连接器上的标识是 ${userId}。`,
+    '记忆是所有连接器共用的；每条对话的上下文各自独立，看不到彼此。',
+  ]
+  if (counterpart !== null) {
+    // Without this the agent treats its own other conversation as a stranger's.
+    const other = CHANNEL_LABELS[counterpart.channel] ?? counterpart.channel
+    lines.push(`这位用户在「${other}」上也是同一个人，那边的对话同样是他的。`)
+  }
+  lines.push(
+    '如果用户提到你在这个连接器之外说过的话，用 session_search 或 session_list 配合 session_read 去查，不要凭印象编造。',
+  )
   prompt.section({
     name: 'baibao-channel-context',
     order: 55,
-    text: [
-      `你现在通过「${label}」和这位用户对话。`,
-      `用户在这个连接器上的标识是 ${userId}。`,
-      '记忆是所有连接器共用的；每条对话的上下文各自独立，看不到彼此。',
-      '如果用户提到你在这个连接器之外说过的话，用 session_search 或 session_list 配合 session_read 去查，不要凭印象编造。',
-    ].join(''),
+    text: lines.join(''),
   })
 }
 
@@ -151,7 +161,9 @@ async function ensureSession(ctx, key, channel, userId) {
  * @param options.log        (level, detail) => void
  */
 export async function askAgent(ctx, text, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000
+  // Agent turns that use tools routinely take a minute; two minutes is the
+  // point where waiting longer is worse than a partial answer.
+  const timeoutMs = options.timeoutMs ?? 120_000
   const log = options.log ?? (() => {})
   // One conversation per (connector, person); the connector is part of the key
   // because the same person may reach the bot through both.

@@ -9,6 +9,7 @@
  */
 import { QQGateway, fetchAccessToken, fetchGateway, sendC2CMessage, TokenCache } from './qq.js'
 import { isUserAllowed, readChannels, writeChannel } from './store.js'
+import { sendText } from './wechat.js'
 import { WeChatRunner } from './wechat-runner.js'
 
 /**
@@ -139,16 +140,32 @@ export async function startChannel(id, options = {}) {
         const current = runtimes.get(id) ?? { pending: 0 }
         setRuntime(id, { pending: (current.pending ?? 0) + 1 })
         try {
-          return (
-            (await merged.onMessage?.({
+          // Mirrors the QQ shape: the handler gets a `reply` it may call more
+          // than once, and any return value is sent as the final answer. There
+          // is no proactive channel here — `context_token` only covers the
+          // inbound message — so everything has to go out through this.
+          let sent = 0
+          const reply = async (text) => {
+            if (typeof text !== 'string' || text.trim() === '') return
+            sent += 1
+            const result = await sendText(channel.botToken, inbound.userId, text, inbound.contextToken)
+            if (!result.ok) {
+              log('error', `wechat send ${result.status}: ${JSON.stringify(result.body).slice(0, 200)}`)
+            }
+          }
+          const answer = await merged.onMessage?.(
+            {
               channel: 'wechat',
               userId: inbound.userId,
               text: inbound.text,
               hasText: inbound.hasText,
               contextToken: inbound.contextToken,
               messageId: inbound.messageId,
-            })) ?? ''
+            },
+            reply,
           )
+          // A handler that already replied should not have its value sent twice.
+          return sent > 0 ? '' : (answer ?? '')
         } finally {
           const after = runtimes.get(id) ?? { pending: 1 }
           setRuntime(id, { pending: Math.max(0, (after.pending ?? 1) - 1) })
@@ -191,14 +208,30 @@ export async function startChannel(id, options = {}) {
       const current = runtimes.get(id) ?? { pending: 0 }
       setRuntime(id, { pending: (current.pending ?? 0) + 1 })
       try {
-        await merged.onMessage?.({
-          channel: 'qq',
-          userId: message.openid,
-          text: message.content,
-          hasText: message.hasText,
-          contextToken: '',
-          messageId: message.messageId,
-        })
+        // QQ allows at most four passive replies per message, each needing a
+        // distinct msg_seq — so replies are counted here rather than left to
+        // the caller, which cannot know the limit was hit.
+        let seq = 0
+        const reply = async (text) => {
+          if (typeof text !== 'string' || text.trim() === '') return
+          if (seq >= 4) return
+          seq += 1
+          await sendChannelText('qq', message.openid, text, {
+            msgId: message.messageId,
+            msgSeq: seq,
+          })
+        }
+        await merged.onMessage?.(
+          {
+            channel: 'qq',
+            userId: message.openid,
+            text: message.content,
+            hasText: message.hasText,
+            contextToken: '',
+            messageId: message.messageId,
+          },
+          reply,
+        )
       } catch (error) {
         log('error', error instanceof Error ? error.message : String(error))
       } finally {

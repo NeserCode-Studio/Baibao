@@ -19,6 +19,7 @@ export type ChannelsResult =
       ok: true
       channels: ChannelInfo[]
       status: Record<string, ChannelStatusEntry>
+      identity: IdentityView
     }
   | { ok: false; error: string }
 
@@ -59,6 +60,16 @@ function parseChannels(value: unknown): ChannelInfo[] {
   })
 }
 
+function parseIdentity(value: unknown): IdentityView {
+  if (value === null || typeof value !== 'object') return { qq: '', wechat: '', bound: false }
+  const record = value as Record<string, unknown>
+  return {
+    qq: typeof record.qq === 'string' ? record.qq : '',
+    wechat: typeof record.wechat === 'string' ? record.wechat : '',
+    bound: record.bound === true,
+  }
+}
+
 function parseStatus(value: unknown): Record<string, ChannelStatusEntry> {
   if (value === null || typeof value !== 'object') return {}
   const result: Record<string, ChannelStatusEntry> = {}
@@ -80,6 +91,7 @@ export async function getChannels(): Promise<ChannelsResult> {
       ok?: boolean
       channels?: unknown
       status?: unknown
+      identity?: unknown
       error?: string
     }
     if (body.ok !== true) return { ok: false, error: body.error ?? `http-${response.status}` }
@@ -87,6 +99,7 @@ export async function getChannels(): Promise<ChannelsResult> {
       ok: true,
       channels: parseChannels(body.channels),
       status: parseStatus(body.status),
+      identity: parseIdentity(body.identity),
     }
   } catch {
     return { ok: false, error: 'network' }
@@ -202,6 +215,43 @@ export async function pollWechatQr(qrcode: string): Promise<QrPollResult> {
         botId: typeof body.state?.botId === 'string' ? body.state.botId : '',
       },
       channels: Array.isArray(body.channels) ? parseChannels(body.channels) : undefined,
+    }
+  } catch {
+    return { ok: false, error: 'network' }
+  }
+}
+
+export interface IdentityView {
+  qq: string
+  wechat: string
+  bound: boolean
+}
+
+/** Save the binding between the same person's two platform ids. */
+export async function saveIdentity(patch: {
+  qq?: string
+  wechat?: string
+}): Promise<{ ok: true; identity: IdentityView } | { ok: false; error: string }> {
+  try {
+    const response = await fetch(apiPath(ROUTE), {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: patch }),
+    })
+    const body = (await response.json()) as {
+      ok?: boolean
+      identity?: { qq?: unknown; wechat?: unknown; bound?: unknown }
+      error?: string
+    }
+    if (body.ok !== true) return { ok: false, error: body.error ?? `http-${response.status}` }
+    return {
+      ok: true,
+      identity: {
+        qq: typeof body.identity?.qq === 'string' ? body.identity.qq : '',
+        wechat: typeof body.identity?.wechat === 'string' ? body.identity.wechat : '',
+        bound: body.identity?.bound === true,
+      },
     }
   } catch {
     return { ok: false, error: 'network' }

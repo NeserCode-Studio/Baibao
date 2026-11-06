@@ -20,7 +20,7 @@
 import path from 'node:path'
 import { attachBaibaoAgent } from './host/agent-hook.js'
 import { askAgent } from './host/channels/agent-bridge.js'
-import { configureChannels, sendChannelText, startChannel } from './host/channels/manager.js'
+import { configureChannels, startChannel } from './host/channels/manager.js'
 import { readChannels } from './host/channels/store.js'
 import { defaultRoot, readLocation } from './host/paths.js'
 import { ensureBaibaoPreset } from './host/preset.js'
@@ -93,24 +93,36 @@ export function apply(ctx) {
     onRejected: (message) => {
       console.error(`[baibao:channel] rejected unknown sender ${message.openid}`)
     },
-    onMessage: async (message) => {
+    onMessage: async (message, reply) => {
       const log = (level, detail) => console.error(`[baibao:channel] ${level} ${detail}`)
-      const reply = await askAgent(ctx, message.text, {
-        // One conversation per (connector, person).
-        channel: message.channel,
-        userId: message.userId,
-        log,
-      })
-      const text = reply === '' ? '这条我没能及时回答，你可以在百宝里继续问。' : reply
 
-      // QQ replies through the send API and needs the originating msg_id to be
-      // a passive reply; WeChat replies with the runner's return value because
-      // its context_token only lives for that one inbound message.
-      if (message.channel === 'qq') {
-        await sendChannelText('qq', message.userId, text, { msgId: message.messageId })
-        return ''
+      // A turn with tools can take a minute. Say something before then, so the
+      // user is not staring at a spinner wondering whether it was received.
+      let acknowledged = false
+      const ackTimer = setTimeout(() => {
+        acknowledged = true
+        void reply('收到，我查一下，稍等…').catch(() => {})
+      }, 8000)
+
+      let answer = ''
+      try {
+        answer = await askAgent(ctx, message.text, {
+          channel: message.channel,
+          userId: message.userId,
+          log,
+        })
+      } finally {
+        clearTimeout(ackTimer)
       }
-      return text
+
+      const text =
+        answer === ''
+          ? acknowledged
+            ? '这条我没能及时答完，你可以在百宝里接着问。'
+            : '这条我没能及时回答，你可以在百宝里继续问。'
+          : answer
+      await reply(text)
+      return ''
     },
   })
   // Reconnect channels that were left enabled, so a DSH restart does not

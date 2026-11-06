@@ -134,3 +134,62 @@ export function isUserAllowed(channel, openid) {
   if (!Array.isArray(channel.allowedUsers) || channel.allowedUsers.length === 0) return false
   return channel.allowedUsers.includes(openid)
 }
+
+/**
+ * The same person on two platforms.
+ *
+ * Without an explicit link the agent cannot tell that the QQ contact and the
+ * WeChat contact are one person, so it treats them as strangers and answers
+ * "I have no conversation with you there". Binding them is a deliberate act
+ * because guessing from allow-lists would merge two different people.
+ *
+ * The panel shows masked forms only; these ids are long and reveal nothing
+ * useful when printed in full.
+ */
+export async function readIdentity() {
+  const config = await readConfigData()
+  const raw = config.identity ?? {}
+  return {
+    qq: typeof raw.qq === 'string' ? raw.qq : '',
+    wechat: typeof raw.wechat === 'string' ? raw.wechat : '',
+  }
+}
+
+export async function writeIdentity(patch) {
+  const config = await readConfigData()
+  const current = { ...(config.identity ?? {}) }
+  if (typeof patch.qq === 'string') current.qq = patch.qq.trim().slice(0, 200)
+  if (typeof patch.wechat === 'string') current.wechat = patch.wechat.trim().slice(0, 200)
+  config.identity = current
+  config.updatedAt = new Date().toISOString()
+  await writeConfigData(config)
+  return { qq: current.qq ?? '', wechat: current.wechat ?? '' }
+}
+
+/** Enough of an id to recognise it, not enough to be worth copying. */
+function maskId(value) {
+  if (typeof value !== 'string' || value === '') return ''
+  if (value.length <= 6) return `${value.slice(0, 2)}****`
+  return `${value.slice(0, 4)}****${value.slice(-3)}`
+}
+
+export function maskIdentity(identity) {
+  return {
+    qq: maskId(identity?.qq),
+    wechat: maskId(identity?.wechat),
+    bound: (identity?.qq ?? '') !== '' && (identity?.wechat ?? '') !== '',
+  }
+}
+
+/** The other platform's id for this sender, when the pair is bound. */
+export async function counterpartOf(channel, userId) {
+  const identity = await readIdentity()
+  if (identity.qq === '' || identity.wechat === '') return null
+  if (channel === 'qq' && identity.qq === userId && identity.wechat !== '') {
+    return { channel: 'wechat', userId: identity.wechat }
+  }
+  if (channel === 'wechat' && identity.wechat === userId && identity.qq !== '') {
+    return { channel: 'qq', userId: identity.qq }
+  }
+  return null
+}

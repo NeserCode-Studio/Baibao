@@ -17,7 +17,15 @@ import {
   startChannel,
   stopChannel,
 } from '../channels/manager.js'
-import { CHANNEL_IDS, maskChannel, readChannels, writeChannel } from '../channels/store.js'
+import {
+  CHANNEL_IDS,
+  maskChannel,
+  maskIdentity,
+  readChannels,
+  readIdentity,
+  writeChannel,
+  writeIdentity,
+} from '../channels/store.js'
 import { readJson, sendJson } from '../util.js'
 
 export function registerChannelRoutes(ctx, hostCtx) {
@@ -37,12 +45,25 @@ export function registerChannelRoutes(ctx, hostCtx) {
                 channels: CHANNEL_IDS.map((id) => maskChannel(id, channels[id])),
                 status: channelStatus(),
                 pendingSenders: pendingSenders(),
+                identity: maskIdentity(await readIdentity()),
               })
               return
             }
 
             if (request.method === 'POST') {
               const body = await readJson(request)
+              if (body?.identity !== undefined && typeof body.identity === 'object') {
+                await writeIdentity(body.identity)
+                const all = await readChannels()
+                sendJson(response, 200, {
+                  ok: true,
+                  channels: CHANNEL_IDS.map((key) => maskChannel(key, all[key])),
+                  status: channelStatus(),
+                  pendingSenders: pendingSenders(),
+                  identity: maskIdentity(await readIdentity()),
+                })
+                return
+              }
               const id = typeof body?.id === 'string' ? body.id : ''
               if (id === '') {
                 sendJson(response, 400, { ok: false, error: 'missing-channel-id' })
