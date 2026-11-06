@@ -137,18 +137,12 @@ async function ensureSession(ctx, key, channel, userId) {
   if (controller === undefined || workspaces === undefined) throw new Error('dsh-services-missing')
   const cached = sessions.get(key)
   if (cached !== undefined) {
-    try {
-      const resolved = await controller.resolveAgent(cached)
-      if (resolved?.agent !== undefined) {
-        // Re-assert the mapping: a process restart forgets it while the cached
-        // session id may survive in a caller.
-        setChannelContext(cached, { channel, userId, label: channelTitle(channel, userId) })
-        return { controller, sessionId: cached }
-      }
-    } catch {
-      // Gone or archived: fall through and make a new one.
-    }
-    sessions.delete(key)
+    // Reuse the conversation without asking whether its agent is alive. An idle
+    // agent is reclaimed by DSH, and checking for one treated every reclaim as a
+    // dead session — creating a new conversation each time the user paused.
+    // `prompt` resumes a session itself, so the id is enough.
+    setChannelContext(cached, { channel, userId, label: channelTitle(channel, userId) })
+    return { controller, sessionId: cached }
   }
 
   const workspaceDir = path.join(defaultRoot(), 'workspace')

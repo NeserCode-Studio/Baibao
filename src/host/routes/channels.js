@@ -45,27 +45,24 @@ export function registerChannelRoutes(ctx, hostCtx) {
         handler: async (request, response) => {
           const report = { build: BUILD, agents: [] }
           try {
-            // Restore archives this session's earlier mistake created. Archiving
-            // removed conversations from the workspace registry, which made every
-            // list surface report zero even though the logs were intact.
-            if (request.url !== undefined && request.url.includes('restore=1')) {
+            // Targeted, explicit archive: only the ids the caller names. The
+            // previous version matched every QQ/WeChat title and swept up
+            // conversations the user had archived by hand.
+            if (request.url !== undefined && request.url.includes('archiveIds=')) {
               const workspaces = ctx.get('workspaceController')
-              const { listSessionLogs } = await import('../channels/session-files.js')
-              const rows = listSessionLogs(200).filter(
-                (row) => row.title.startsWith('QQ ·') || row.title.startsWith('微信 ·'),
-              )
-              report.restored = []
-              for (const row of rows) {
+              const raw = decodeURIComponent(request.url.split('archiveIds=')[1].split('&')[0])
+              report.archived = []
+              for (const id of raw.split(',').map((item) => item.trim()).filter(Boolean)) {
                 try {
-                  await workspaces.unarchiveSession({ sessionId: row.id })
-                  report.restored.push(row.id.slice(8, 16))
-                } catch {
-                  // Already active.
+                  await workspaces.archiveSession({ sessionId: id })
+                  report.archived.push(id.slice(8, 16))
+                } catch (caught) {
+                  report.archived.push(`${id.slice(8, 16)}:${caught instanceof Error ? caught.message : 'fail'}`)
                 }
               }
             }
           } catch (caught) {
-            report.restoreError = caught instanceof Error ? caught.message : String(caught)
+            report.archiveError = caught instanceof Error ? caught.message : String(caught)
           }
           try {
             // List first: reading a log records why it failed, and the store line
