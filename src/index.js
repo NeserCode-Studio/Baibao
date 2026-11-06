@@ -94,42 +94,43 @@ export function apply(ctx) {
       console.error(`[baibao:channel] rejected unknown sender ${message.openid}`)
     },
     onMessage: async (message) => {
-      // Stickers and image-only messages arrive with no text. Say so instead of
-      // staying silent, otherwise the sender cannot tell whether it worked.
-      if (!message.hasText) {
-        await sendChannelText('qq', message.openid, '目前只能处理文字消息，表情和图片还看不了。', {
-          msgId: message.messageId,
-        })
-        return
-      }
-      const reply = await askAgent(ctx, message.content, {
-        // Each sender gets their own conversation.
-        chatId: message.openid,
-        log: (level, detail) => console.error(`[baibao:channel] ${level} ${detail}`),
+      const log = (level, detail) => console.error(`[baibao:channel] ${level} ${detail}`)
+      const reply = await askAgent(ctx, message.text, {
+        // Each sender gets their own conversation, keyed by their platform id.
+        chatId: `${message.channel}:${message.userId}`,
+        log,
       })
-      await sendChannelText(
-        'qq',
-        message.openid,
-        reply === '' ? '这条我没能及时回答，你可以在百宝里继续问。' : reply,
-        { msgId: message.messageId },
-      )
+      const text = reply === '' ? '这条我没能及时回答，你可以在百宝里继续问。' : reply
+
+      // QQ replies through the send API and needs the originating msg_id to be
+      // a passive reply; WeChat replies with the runner's return value because
+      // its context_token only lives for that one inbound message.
+      if (message.channel === 'qq') {
+        await sendChannelText('qq', message.userId, text, { msgId: message.messageId })
+        return ''
+      }
+      return text
     },
   })
-
-  // Reconnect a channel that was left enabled, so a DSH restart does not
+  // Reconnect channels that were left enabled, so a DSH restart does not
   // silently take the phone client offline.
   void readChannels()
-    .then((channels) => {
+    .then(async (channels) => {
       const qq = channels.qq
-      if (qq.enabled && qq.appId !== '' && qq.appSecret !== '') {
-        return startChannel('qq').catch((error) => {
+      const wx = channels.wechat
+      const jobs = []
+      if (qq.enabled && qq.appId !== '' && qq.appSecret !== '') jobs.push('qq')
+      // WeChat has no credential to refresh; an expired login is already
+      // persisted as disabled, so anything still enabled is worth resuming.
+      if (wx.enabled && wx.botToken !== '') jobs.push('wechat')
+      for (const id of jobs) {
+        await startChannel(id).catch((error) => {
           console.error(
-            '[baibao:channel] autostart failed: ' +
+            `[baibao:channel] autostart ${id} failed: ` +
               (error instanceof Error ? error.message : String(error)),
           )
         })
       }
-      return undefined
     })
     .catch(() => {})
 

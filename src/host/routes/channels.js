@@ -17,7 +17,7 @@ import {
   startChannel,
   stopChannel,
 } from '../channels/manager.js'
-import { maskChannel, readChannels, writeChannel } from '../channels/store.js'
+import { CHANNEL_IDS, maskChannel, readChannels, writeChannel } from '../channels/store.js'
 import { readJson, sendJson } from '../util.js'
 
 export function registerChannelRoutes(ctx, hostCtx) {
@@ -34,7 +34,7 @@ export function registerChannelRoutes(ctx, hostCtx) {
               const channels = await readChannels()
               sendJson(response, 200, {
                 ok: true,
-                channels: ['qq'].map((id) => maskChannel(id, channels[id])),
+                channels: CHANNEL_IDS.map((id) => maskChannel(id, channels[id])),
                 status: channelStatus(),
                 pendingSenders: pendingSenders(),
               })
@@ -47,6 +47,61 @@ export function registerChannelRoutes(ctx, hostCtx) {
               if (id === '') {
                 sendJson(response, 400, { ok: false, error: 'missing-channel-id' })
                 return
+              }
+
+              // WeChat logs in by QR scan; the panel drives the two steps.
+              if (typeof body?.action === 'string') {
+                const { pollQrStatus, requestQrCode } = await import('../channels/wechat.js')
+                if (body.action === 'qr') {
+                  try {
+                    const code = await requestQrCode()
+                    sendJson(response, 200, { ok: true, qr: code })
+                  } catch (error) {
+                    sendJson(response, 200, {
+                      ok: false,
+                      error: error instanceof Error ? error.message : String(error),
+                    })
+                  }
+                  return
+                }
+                if (body.action === 'poll') {
+                  const qrcode = typeof body.qrcode === 'string' ? body.qrcode : ''
+                  if (qrcode === '') {
+                    sendJson(response, 400, { ok: false, error: 'missing-qrcode' })
+                    return
+                  }
+                  try {
+                    const state = await pollQrStatus(qrcode)
+                    if (state.done) {
+                      // Persist the credential and bring the channel up in one
+                      // step: a successful scan should not need a second click.
+                      const saved = await writeChannel('wechat', {
+                        enabled: true,
+                        botToken: state.botToken,
+                        botId: state.botId,
+                        userId: state.userId,
+                      })
+                      await startChannel('wechat').catch(() => {})
+                      const all = await readChannels()
+                      sendJson(response, 200, {
+                        ok: true,
+                        state,
+                        channel: maskChannel('wechat', saved),
+                        channels: ['qq', 'wechat'].map((key) => maskChannel(key, all[key])),
+                        status: channelStatus(),
+                        pendingSenders: pendingSenders(),
+                      })
+                      return
+                    }
+                    sendJson(response, 200, { ok: true, state })
+                  } catch (error) {
+                    sendJson(response, 200, {
+                      ok: false,
+                      error: error instanceof Error ? error.message : String(error),
+                    })
+                  }
+                  return
+                }
               }
 
               // "Approve this sender" is the common case and would otherwise
@@ -63,7 +118,7 @@ export function registerChannelRoutes(ctx, hostCtx) {
                 sendJson(response, 200, {
                   ok: true,
                   channel: maskChannel(id, updated),
-                  channels: ['qq'].map((key) => maskChannel(key, channels[key])),
+                  channels: CHANNEL_IDS.map((key) => maskChannel(key, channels[key])),
                   status: channelStatus(),
                   pendingSenders: pendingSenders(),
                 })
@@ -90,7 +145,7 @@ export function registerChannelRoutes(ctx, hostCtx) {
               sendJson(response, 200, {
                 ok: true,
                 channel: maskChannel(id, updated),
-                channels: ['qq'].map((key) => maskChannel(key, channels[key])),
+                channels: CHANNEL_IDS.map((key) => maskChannel(key, channels[key])),
                 status: channelStatus(),
                 pendingSenders: pendingSenders(),
                 ...(connectError === null ? {} : { connectError }),

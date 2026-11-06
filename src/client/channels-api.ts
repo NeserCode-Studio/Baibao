@@ -101,6 +101,7 @@ export async function saveChannel(
     appSecret?: string
     clearSecret?: boolean
     allowedUsers?: string[]
+    botToken?: string
   },
 ): Promise<ChannelSaveResult> {
   try {
@@ -121,6 +122,80 @@ export async function saveChannel(
       return { ok: false, error: body.error ?? `http-${response.status}` }
     }
     return { ok: true, channel, channels: parseChannels(body.channels) }
+  } catch {
+    return { ok: false, error: 'network' }
+  }
+}
+
+export interface QrState {
+  status: string
+  done: boolean
+  expired: boolean
+  botId: string
+}
+
+export interface QrCode {
+  qrcode: string
+  image: string
+}
+
+export type QrResult = { ok: true; qr: QrCode } | { ok: false; error: string }
+export type QrPollResult =
+  | { ok: true; state: QrState; channels?: ChannelInfo[] }
+  | { ok: false; error: string }
+
+/** Ask the platform for a fresh login QR code. */
+export async function requestWechatQr(): Promise<QrResult> {
+  try {
+    const response = await fetch(apiPath(ROUTE), {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'wechat', action: 'qr' }),
+    })
+    const body = (await response.json()) as {
+      ok?: boolean
+      qr?: { qrcode?: unknown; image?: unknown }
+      error?: string
+    }
+    if (body.ok !== true || typeof body.qr?.qrcode !== 'string') {
+      return { ok: false, error: body.error ?? `http-${response.status}` }
+    }
+    return {
+      ok: true,
+      qr: { qrcode: body.qr.qrcode, image: typeof body.qr.image === 'string' ? body.qr.image : '' },
+    }
+  } catch {
+    return { ok: false, error: 'network' }
+  }
+}
+
+/** Poll one login attempt. */
+export async function pollWechatQr(qrcode: string): Promise<QrPollResult> {
+  try {
+    const response = await fetch(apiPath(ROUTE), {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'wechat', action: 'poll', qrcode }),
+    })
+    const body = (await response.json()) as {
+      ok?: boolean
+      state?: { status?: unknown; done?: unknown; expired?: unknown; botId?: unknown }
+      channels?: unknown
+      error?: string
+    }
+    if (body.ok !== true) return { ok: false, error: body.error ?? `http-${response.status}` }
+    return {
+      ok: true,
+      state: {
+        status: typeof body.state?.status === 'string' ? body.state.status : 'unknown',
+        done: body.state?.done === true,
+        expired: body.state?.expired === true,
+        botId: typeof body.state?.botId === 'string' ? body.state.botId : '',
+      },
+      channels: Array.isArray(body.channels) ? parseChannels(body.channels) : undefined,
+    }
   } catch {
     return { ok: false, error: 'network' }
   }

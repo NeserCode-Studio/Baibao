@@ -8,7 +8,8 @@
  * the caller, not here.
  */
 import { QQGateway, fetchAccessToken, fetchGateway, sendC2CMessage, TokenCache } from './qq.js'
-import { isUserAllowed, readChannels } from './store.js'
+import { isUserAllowed, readChannels, writeChannel } from './store.js'
+import { WeChatRunner } from './wechat-runner.js'
 
 /**
  * @typedef {object} ChannelRuntime
@@ -87,26 +88,84 @@ function setRuntime(id, patch) {
 }
 
 /**
- * Start the QQ connection if it is configured and allowed to run.
+ * Start a channel if it is configured and allowed to run.
  *
- * @param options.onMessage async (message) => void, called for allowed senders
+ * @param options.onMessage async (message) => string for WeChat, void for QQ;
+ *   QQ sends its own reply through `sendChannelText`, WeChat replies from the
+ *   return value because its `context_token` is only valid for that message.
  * @param options.onRejected (message) => void, called for unknown senders so the
  *   UI can offer them for approval instead of silently dropping them
  * @param options.log (level, message) => void
  */
 export async function startChannel(id, options = {}) {
-  if (id !== 'qq') throw new Error('unknown-channel')
+  if (id !== 'qq' && id !== 'wechat') throw new Error('unknown-channel')
   const existing = runtimes.get(id)
-  if (existing?.gateway?.running === true) return channelStatus()
+  if (existing?.gateway?.running === true || existing?.runner?.running === true) {
+    return channelStatus()
+  }
 
   const merged = { ...defaultOptions, ...options }
   const channels = await readChannels()
+  const log = merged.log ?? (() => {})
+
+  if (id === 'wechat') {
+    const channel = channels.wechat
+    if (!channel.enabled) throw new Error('channel-disabled')
+    if (channel.botToken === '') throw new Error('channel-unconfigured')
+
+    const runner = new WeChatRunner({
+      token: channel.botToken,
+      log,
+      isAllowed: async (userId) => isUserAllowed((await readChannels()).wechat, userId),
+      onRejected: (inbound) => {
+        noteRejected({ openid: inbound.userId, content: inbound.text })
+        try {
+          merged.onRejected?.(inbound)
+        } catch {
+          // Reporting must not break the loop.
+        }
+      },
+      onStatus: (status) => {
+        setRuntime(id, { state: status.state, detail: status.detail })
+        // An expired login is worth persisting: it survives a restart, and the
+        // panel must keep asking for a new scan until one succeeds.
+        if (status.state === 'expired') {
+          void writeChannel('wechat', { enabled: false }).catch(() => {})
+        }
+      },
+      onMessage: async (inbound) => {
+        setRuntime(id, { lastMessageAt: new Date().toISOString() })
+        if (!inbound.hasText) return '目前只能处理文字消息，表情和图片还看不了。'
+        const current = runtimes.get(id) ?? { pending: 0 }
+        setRuntime(id, { pending: (current.pending ?? 0) + 1 })
+        try {
+          return (
+            (await merged.onMessage?.({
+              channel: 'wechat',
+              userId: inbound.userId,
+              text: inbound.text,
+              hasText: inbound.hasText,
+              contextToken: inbound.contextToken,
+              messageId: inbound.messageId,
+            })) ?? ''
+          )
+        } finally {
+          const after = runtimes.get(id) ?? { pending: 1 }
+          setRuntime(id, { pending: Math.max(0, (after.pending ?? 1) - 1) })
+        }
+      },
+    })
+
+    setRuntime(id, { state: 'connecting', runner, gateway: null, tokens: null, pending: 0, detail: undefined })
+    runner.start()
+    return channelStatus()
+  }
+
   const channel = channels.qq
   if (!channel.enabled) throw new Error('channel-disabled')
   if (channel.appId === '' || channel.appSecret === '') throw new Error('channel-unconfigured')
 
   const tokens = new TokenCache(() => fetchAccessToken(channel.appId, channel.appSecret))
-  const log = merged.log ?? (() => {})
 
   const gateway = new QQGateway({
     token: () => tokens.get(),
@@ -132,7 +191,14 @@ export async function startChannel(id, options = {}) {
       const current = runtimes.get(id) ?? { pending: 0 }
       setRuntime(id, { pending: (current.pending ?? 0) + 1 })
       try {
-        await merged.onMessage?.(message)
+        await merged.onMessage?.({
+          channel: 'qq',
+          userId: message.openid,
+          text: message.content,
+          hasText: message.hasText,
+          contextToken: '',
+          messageId: message.messageId,
+        })
       } catch (error) {
         log('error', error instanceof Error ? error.message : String(error))
       } finally {
@@ -152,7 +218,10 @@ export function stopChannel(id) {
   if (runtime?.gateway !== undefined && runtime.gateway !== null) {
     runtime.gateway.stop()
   }
-  runtimes.set(id, { state: 'stopped', pending: 0, gateway: null, tokens: null })
+  if (runtime?.runner !== undefined && runtime.runner !== null) {
+    runtime.runner.stop()
+  }
+  runtimes.set(id, { state: 'stopped', pending: 0, gateway: null, runner: null, tokens: null })
   return channelStatus()
 }
 

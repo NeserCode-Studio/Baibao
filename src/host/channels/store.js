@@ -2,7 +2,7 @@
  * Channel credentials and the allow-list.
  *
  * Stored in `<root>/config/channels.json` next to the other user-editable
- * state. The secret is never returned through the API — `maskChannel` exists so
+ * state. Secrets are never returned through the API — `maskChannel` exists so
  * the panel can show "configured / not configured" without the value crossing
  * the wire a second time.
  *
@@ -12,10 +12,26 @@
  */
 import { readConfigData, writeConfigData } from '../config.js'
 
-const CHANNEL_IDS = ['qq']
+export const CHANNEL_IDS = ['qq', 'wechat']
 
-function emptyChannel() {
+/** Each channel has its own credential shape; the rest of the fields agree. */
+function emptyChannel(id) {
+  if (id === 'wechat') {
+    return { enabled: false, botToken: '', botId: '', userId: '', allowedUsers: [] }
+  }
   return { enabled: false, appId: '', appSecret: '', allowedUsers: [] }
+}
+
+function str(value, limit) {
+  return typeof value === 'string' ? value.trim().slice(0, limit) : ''
+}
+
+function cleanUsers(value) {
+  if (!Array.isArray(value)) return null
+  return value
+    .filter((item) => typeof item === 'string' && item.trim() !== '')
+    .map((item) => item.trim())
+    .slice(0, 200)
 }
 
 /** Read all channel settings with defaults filled in. */
@@ -25,13 +41,24 @@ export async function readChannels() {
   const result = { version: 1 }
   for (const id of CHANNEL_IDS) {
     const entry = raw[id] ?? {}
-    result[id] = {
+    const base = emptyChannel(id)
+    const users = cleanUsers(entry.allowedUsers)
+    if (id === 'wechat') {
+      result.wechat = {
+        enabled: entry.enabled === true,
+        botToken: str(entry.botToken, 1000),
+        botId: str(entry.botId, 200),
+        userId: str(entry.userId, 200),
+        allowedUsers: users ?? [],
+      }
+      continue
+    }
+    result.qq = {
+      ...base,
       enabled: entry.enabled === true,
-      appId: typeof entry.appId === 'string' ? entry.appId : '',
-      appSecret: typeof entry.appSecret === 'string' ? entry.appSecret : '',
-      allowedUsers: Array.isArray(entry.allowedUsers)
-        ? entry.allowedUsers.filter((item) => typeof item === 'string' && item !== '').slice(0, 200)
-        : [],
+      appId: str(entry.appId, 200),
+      appSecret: str(entry.appSecret, 500),
+      allowedUsers: users ?? [],
     }
   }
   return result
@@ -42,22 +69,26 @@ export async function writeChannel(id, patch) {
   if (!CHANNEL_IDS.includes(id)) throw new Error('unknown-channel')
   const config = await readConfigData()
   const channels = { ...(config.channels ?? {}) }
-  const current = { ...emptyChannel(), ...(channels[id] ?? {}) }
+  const current = { ...emptyChannel(id), ...(channels[id] ?? {}) }
 
   if (typeof patch.enabled === 'boolean') current.enabled = patch.enabled
-  if (typeof patch.appId === 'string') current.appId = patch.appId.trim().slice(0, 200)
+  if (typeof patch.appId === 'string') current.appId = str(patch.appId, 200)
   // An empty string means "leave the existing secret alone": the panel never
   // receives the real value, so it cannot echo it back.
   if (typeof patch.appSecret === 'string' && patch.appSecret !== '') {
-    current.appSecret = patch.appSecret.trim().slice(0, 500)
+    current.appSecret = str(patch.appSecret, 500)
   }
-  if (patch.clearSecret === true) current.appSecret = ''
-  if (Array.isArray(patch.allowedUsers)) {
-    current.allowedUsers = patch.allowedUsers
-      .filter((item) => typeof item === 'string' && item.trim() !== '')
-      .map((item) => item.trim())
-      .slice(0, 200)
+  if (patch.clearSecret === true) {
+    current.appSecret = ''
+    current.botToken = ''
   }
+  if (typeof patch.botToken === 'string' && patch.botToken !== '') {
+    current.botToken = str(patch.botToken, 1000)
+  }
+  if (typeof patch.botId === 'string') current.botId = str(patch.botId, 200)
+  if (typeof patch.userId === 'string') current.userId = str(patch.userId, 200)
+  const users = cleanUsers(patch.allowedUsers)
+  if (users !== null) current.allowedUsers = users
 
   channels[id] = current
   config.channels = channels
@@ -70,6 +101,16 @@ export async function writeChannel(id, patch) {
  * A channel as the panel should see it: no secret, just whether one exists.
  */
 export function maskChannel(id, channel) {
+  if (id === 'wechat') {
+    return {
+      id,
+      enabled: channel.enabled === true,
+      appId: channel.botId,
+      hasSecret: channel.botToken !== '',
+      allowedUsers: channel.allowedUsers,
+      configured: channel.botToken !== '',
+    }
+  }
   return {
     id,
     enabled: channel.enabled === true,

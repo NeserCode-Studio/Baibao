@@ -23,9 +23,12 @@ import { getConfig, saveConsolidationModel, type ModelChoice } from './config-ap
 import { getPush, savePush, type PushState } from './push-api'
 import {
   getChannels,
+  pollWechatQr,
+  requestWechatQr,
   saveChannel,
   type ChannelInfo,
   type ChannelStatusEntry,
+  type QrCode,
 } from './channels-api'
 import {
   DEFAULT_JUNG,
@@ -776,6 +779,173 @@ function MemoryList({ t }: BaibaoPanelProps) {
 }
 
 /**
+ * WeChat connection: scan a QR code, nothing to type.
+ *
+ * The login is a two-step HTTP flow (ask for a code, poll its status), so the
+ * panel drives the polling itself and stops as soon as the scan lands or the
+ * code expires. An expired session is shown plainly — iLink has no refresh, and
+ * pretending otherwise would leave the user waiting for a bot that cannot reply.
+ */
+function WechatChannel({ t }: { t: TranslateBaibao }) {
+  const [channel, setChannel] = useState<ChannelInfo | null>(null)
+  const [status, setStatus] = useState<ChannelStatusEntry>({ state: 'unknown' })
+  const [qr, setQr] = useState<QrCode | null>(null)
+  const [qrState, setQrState] = useState('')
+  const [users, setUsers] = useState('')
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'busy' | 'error'>('loading')
+
+  const applyChannel = (next: ChannelInfo): void => {
+    setChannel(next)
+    setUsers(next.allowedUsers.join(', '))
+  }
+
+  useEffect(() => {
+    let live = true
+    void getChannels().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        const wx = result.channels.find((item) => item.id === 'wechat')
+        if (wx !== undefined) applyChannel(wx)
+        setStatus(result.status.wechat ?? { state: 'unknown' })
+        setPhase('ready')
+      } else {
+        setPhase('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Poll while a code is on screen.
+  useEffect(() => {
+    if (qr === null || qrState === 'done') return undefined
+    const timer = setInterval(() => {
+      void pollWechatQr(qr.qrcode).then((result) => {
+        if (!result.ok) return
+        setQrState(result.state.status)
+        if (result.state.done) {
+          setQr(null)
+          void getChannels().then((next) => {
+            if (!next.ok) return
+            const wx = next.channels.find((item) => item.id === 'wechat')
+            if (wx !== undefined) applyChannel(wx)
+            setStatus(next.status.wechat ?? { state: 'unknown' })
+          })
+        } else if (result.state.expired) {
+          setQr(null)
+        }
+      })
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [qr, qrState])
+
+  const startScan = (): void => {
+    setPhase('busy')
+    setQrState('')
+    void requestWechatQr().then((result) => {
+      if (result.ok) {
+        setQr(result.qr)
+        setQrState('wait')
+        setPhase('ready')
+      } else {
+        setPhase('error')
+      }
+    })
+  }
+
+  const saveUsers = (): void => {
+    setPhase('busy')
+    void saveChannel('wechat', {
+      allowedUsers: users
+        .split(/[,，\s]+/)
+        .map((item) => item.trim())
+        .filter((item) => item !== ''),
+    }).then((result) => {
+      if (result.ok) {
+        applyChannel(result.channel)
+        setPhase('ready')
+      } else {
+        setPhase('error')
+      }
+    })
+  }
+
+  const connected = channel?.configured === true
+  const stateKey: BaibaoKey =
+    status.state === 'ready'
+      ? 'channelStateReady'
+      : status.state === 'expired'
+        ? 'channelStateExpired'
+        : status.state === 'connecting' || status.state === 'reconnecting'
+          ? 'channelStateConnecting'
+          : status.state === 'error'
+            ? 'channelStateError'
+            : 'channelStateIdle'
+
+  return (
+    <div className="bb-channel">
+      <div className="bb-jungRowTop">
+        <span className="bb-jungBlockTitle">{t('channelWechatTitle')}</span>
+        <span
+          className={status.state === 'ready' ? 'bb-channelStateOk' : 'bb-channelState'}
+          role="status"
+        >
+          {t(stateKey)}
+        </span>
+      </div>
+      <p className="bb-storageHint">{t('channelWechatBody')}</p>
+
+      {qr !== null && (
+        <div className="bb-channelQr">
+          {qr.image !== '' && <img src={qr.image} alt={t('channelWechatScan')} />}
+          <p className="bb-storageHint">
+            {qrState === 'scaned' ? t('channelWechatScanned') : t('channelWechatScan')}
+          </p>
+        </div>
+      )}
+
+      <div className="bb-personaActions">
+        <button type="button" className="bb-personaBtn" onClick={startScan} disabled={phase === 'busy'}>
+          {connected ? t('channelWechatRelogin') : t('channelWechatLogin')}
+        </button>
+      </div>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-wx-users">
+          {t('channelAllowedUsers')}
+        </label>
+        <input
+          id="bb-wx-users"
+          type="text"
+          className="bb-memorySearchInput"
+          value={users}
+          spellCheck={false}
+          placeholder={t('channelAllowedUsersHint')}
+          onChange={(event) => {
+            setUsers(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+      <p className="bb-storageHint">{t('channelAllowedUsersBody')}</p>
+
+      <div className="bb-personaActions">
+        <button type="button" className="bb-personaBtn" onClick={saveUsers} disabled={phase === 'busy'}>
+          {t('consolidationSave')}
+        </button>
+      </div>
+
+      {phase === 'error' && (
+        <p className="bb-storageError" role="alert">
+          {t('channelFailed')}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * Push settings: when Baibao may interrupt, and how often.
  *
  * These were fixed at their documented defaults before; the rule gate honoured
@@ -1138,6 +1308,7 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
     >
       <SectionHead title={t('connectionsTitle')} body={t('connectionsBody')} />
       <QqChannel t={t} />
+      <WechatChannel t={t} />
       <PushSettingsCard t={t} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />
