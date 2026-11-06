@@ -152,3 +152,36 @@ export function searchSessionLogs(needle, limit = MAX_SESSIONS) {
 export function findSessionLog(sessionId) {
   return listSessionLogs(200).find((row) => row.id === sessionId) ?? null
 }
+
+/**
+ * Describe what this code can actually see at runtime.
+ *
+ * Written because the same functions worked from a plain Node script and
+ * returned nothing from inside DSH. Guessing at the cause wasted several
+ * rounds; this makes the tool state the facts instead — resolved home, whether
+ * the environment variable was set, whether the directory exists, how many logs
+ * were found.
+ */
+export function describeSessionStore() {
+  const home = dshHome()
+  const root = path.join(home, 'sessions')
+  const parts = [`home=${home}`, `env=${process.env.DSH_HOME ?? '(unset)'}`, `dir=${root}`]
+  try {
+    const groups = readdirSync(root)
+    parts.push(`groups=${groups.length}`)
+    let logs = 0
+    for (const group of groups) {
+      try {
+        for (const entry of readdirSync(path.join(root, group))) {
+          if (entry.startsWith('session-')) logs += 1
+        }
+      } catch {
+        // Unreadable group directory; count what is readable.
+      }
+    }
+    parts.push(`logs=${logs}`)
+  } catch (error) {
+    parts.push(`dirError=${error instanceof Error ? error.code ?? error.message : 'unknown'}`)
+  }
+  return parts.join(' ')
+}

@@ -14,7 +14,13 @@
  * a one-second answer into a ten-second one.
  */
 
-import { findSessionLog, listSessionLogs, readSessionMessages, searchSessionLogs } from './session-files.js'
+import {
+  describeSessionStore,
+  findSessionLog,
+  listSessionLogs,
+  readSessionMessages,
+  searchSessionLogs,
+} from './session-files.js'
 
 /** How many recent conversations a search covers. */
 const SEARCH_DEPTH = 20
@@ -48,7 +54,7 @@ export function sessionTools(_ctx) {
       execute: async () => {
         try {
           const rows = listSessionLogs(LIST_DEPTH)
-          if (rows.length === 0) return '没有其他会话。'
+          if (rows.length === 0) return `没有其他会话。诊断：${describeSessionStore()}`
           return rows.map(formatRow).join('\n')
         } catch (error) {
           return `列表失败：${error instanceof Error ? error.message : String(error)}`
@@ -76,7 +82,7 @@ export function sessionTools(_ctx) {
         if (text === '') return '没有给出关键词。'
         try {
           const hits = searchSessionLogs(text, SEARCH_DEPTH)
-          if (hits.length === 0) return '没有找到相关的过往对话。'
+          if (hits.length === 0) return `没有找到相关的过往对话。诊断：${describeSessionStore()}`
           return hits
             .slice(0, 12)
             .map((hit) => `[${hit.id}] ${hit.title} · ${hit.snippet}`)
