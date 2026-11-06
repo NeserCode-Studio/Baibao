@@ -117,9 +117,11 @@ function baibaoPlugins(shellDialect) {
             timeoutMs: 300000,
           },
         },
-        // The persistent shell mirrors the dialect: a pwsh session cannot drive
-        // a powershell-only machine and vice versa.
-        shellDialect === 'pwsh'
+        // Keep the plugin id fixed. Swapping it for a per-dialect package was
+        // tried and broke preset registration: only `dsh-tool-pwsh-persistent`
+        // and `dsh-tool-bash-persistent` exist, so a `powershell` variant made
+        // the whole preset `broken` and Baibao silently fell back to standard.
+        process.platform === 'win32'
           ? {
               id: 'persistent-shell',
               name: '@deepseek-ai/dsh-tool-pwsh-persistent',
@@ -127,7 +129,7 @@ function baibaoPlugins(shellDialect) {
             }
           : {
               id: 'persistent-shell',
-              name: '@deepseek-ai/dsh-tool-powershell-persistent',
+              name: '@deepseek-ai/dsh-tool-bash-persistent',
               config: { timeoutMs: 300000 },
             },
       ],
