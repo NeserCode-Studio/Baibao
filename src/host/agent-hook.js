@@ -26,6 +26,7 @@ import {
   readPersonaText,
 } from './persona.js'
 import { pushTools } from './push.js'
+import { sessionTools } from './channels/session-tools.js'
 
 /**
  * Attach persona, memory tools, memory context and turn hooks to one agent.
@@ -63,7 +64,7 @@ export function attachBaibaoAgent(ctx, agent, workspacePath) {
     }
 
     try {
-      for (const tool of [...memoryTools(), ...pushTools()]) {
+      for (const tool of [...memoryTools(), ...pushTools(), ...sessionTools(ctx)]) {
         agentCtx.tools.register(tool)
       }
     } catch {

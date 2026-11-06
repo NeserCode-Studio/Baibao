@@ -96,8 +96,9 @@ export function apply(ctx) {
     onMessage: async (message) => {
       const log = (level, detail) => console.error(`[baibao:channel] ${level} ${detail}`)
       const reply = await askAgent(ctx, message.text, {
-        // Each sender gets their own conversation, keyed by their platform id.
-        chatId: `${message.channel}:${message.userId}`,
+        // One conversation per (connector, person).
+        channel: message.channel,
+        userId: message.userId,
         log,
       })
       const text = reply === '' ? '这条我没能及时回答，你可以在百宝里继续问。' : reply

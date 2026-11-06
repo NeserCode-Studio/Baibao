@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { defaultRoot } from '../paths.js'
+import { CHANNEL_LABELS, channelTitle, setChannelContext } from './context.js'
 
 /**
  * One live session per chat, so two people talking to the same bot do not read
@@ -61,6 +62,30 @@ export function isAssistantEvent(type) {
 }
 
 /**
+ * Add a prompt section describing the current connector.
+ *
+ * The agent is the same Baibao everywhere, so it should be able to say "I can
+ * see this on WeChat" rather than guess. Added per turn because the creation
+ * hook fires before the session has been mapped to a connector.
+ */
+async function declareChannel(controller, sessionId, channel, userId) {
+  const resolved = await controller.resolveAgent(sessionId)
+  const prompt = resolved?.agent?.ctx?.systemPrompt
+  if (prompt === undefined || typeof prompt.section !== 'function') return
+  const label = CHANNEL_LABELS[channel] ?? channel
+  prompt.section({
+    name: 'baibao-channel-context',
+    order: 55,
+    text: [
+      `你现在通过「${label}」和这位用户对话。`,
+      `用户在这个连接器上的标识是 ${userId}。`,
+      '记忆是所有连接器共用的；每条对话的上下文各自独立，看不到彼此。',
+      '如果用户提到你在这个连接器之外说过的话，用 session_search 或 session_list 配合 session_read 去查，不要凭印象编造。',
+    ].join(''),
+  })
+}
+
+/**
  * Create the session for one chat, or reuse the live one.
  *
  * The session must be created with `workspaceId`, not `cwd`: the two are
@@ -71,7 +96,7 @@ export function isAssistantEvent(type) {
  * A disposed or archived session must not wedge the channel forever, so the
  * caller rebuilds on failure rather than caching blindly.
  */
-async function ensureSession(ctx, key) {
+async function ensureSession(ctx, key, channel, userId) {
   const controller = ctx.get('sessionController')
   const workspaces = ctx.get('workspaceController')
   if (controller === undefined || workspaces === undefined) throw new Error('dsh-services-missing')
@@ -80,7 +105,12 @@ async function ensureSession(ctx, key) {
   if (cached !== undefined) {
     try {
       const resolved = await controller.resolveAgent(cached)
-      if (resolved?.agent !== undefined) return { controller, sessionId: cached }
+      if (resolved?.agent !== undefined) {
+        // Re-assert the mapping: a process restart forgets it while the cached
+        // session id may survive in a caller.
+        setChannelContext(cached, { channel, userId, label: channelTitle(channel, userId) })
+        return { controller, sessionId: cached }
+      }
     } catch {
       // Gone or archived: fall through and make a new one.
     }
@@ -95,6 +125,16 @@ async function ensureSession(ctx, key) {
     workspaceId: workspace.workspaceId,
     agentPreset: 'baibao',
   })
+
+  const title = channelTitle(channel, userId)
+  setChannelContext(created.sessionId, { channel, userId, label: title })
+  try {
+    // Naming it by connector is what lets the agent tell its own conversations
+    // apart later, in `session_list`.
+    await controller.rename({ sessionId: created.sessionId, title })
+  } catch {
+    // A default title is not worth failing the first message over.
+  }
 
   sessions.set(key, created.sessionId)
   return { controller, sessionId: created.sessionId }
@@ -113,11 +153,14 @@ async function ensureSession(ctx, key) {
 export async function askAgent(ctx, text, options = {}) {
   const timeoutMs = options.timeoutMs ?? 60_000
   const log = options.log ?? (() => {})
-  // One conversation per chat identity; two senders must not share memory.
-  const key = options.chatId ?? 'default'
+  // One conversation per (connector, person); the connector is part of the key
+  // because the same person may reach the bot through both.
+  const channel = options.channel ?? 'qq'
+  const userId = options.userId ?? 'unknown'
+  const key = `${channel}:${userId}`
 
   return withTurnLock(async () => {
-    const { controller, sessionId: target } = await ensureSession(ctx, key)
+    const { controller, sessionId: target } = await ensureSession(ctx, key, channel, userId)
 
     const abort = new AbortController()
     let iterator = null
@@ -138,6 +181,11 @@ export async function askAgent(ctx, text, options = {}) {
       iterator = controller
         .follow({ address: { kind: 'session', sessionId: target }, assistantStream: true }, abort.signal)
         [Symbol.asyncIterator]()
+
+      // Tell the agent where it is talking. This is injected per turn rather
+      // than once at creation, because the creation hook runs before the
+      // session is mapped to a connector.
+      await declareChannel(controller, target, channel, userId).catch(() => {})
 
       const seenTypes = new Set()
       void (async () => {
