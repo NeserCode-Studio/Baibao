@@ -30,7 +30,6 @@ import { registerConfigRoutes } from './host/routes/config.js'
 import { registerMemoryRoutes } from './host/routes/memory.js'
 import { registerNotificationRoutes } from './host/routes/notifications.js'
 import { registerPersonaRoutes } from './host/routes/persona.js'
-import { registerSpikeRoutes } from './host/routes/spike.js'
 import { registerStorageRoutes } from './host/routes/storage.js'
 
 export const name = 'dsh-baibao'
@@ -148,7 +147,5 @@ export function apply(ctx) {
       },
       presetStatus: () => state.presetStatus,
     })
-    // TEMPORARY (S7): drop once the schedule contract is recorded.
-    registerSpikeRoutes(ctx, hostCtx)
   })
 }

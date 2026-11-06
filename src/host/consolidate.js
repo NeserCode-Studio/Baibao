@@ -53,7 +53,15 @@ export function hasCjk(text) {
   return /[\u3400-\u9fff]/.test(text)
 }
 
-export function messageText(message) {
+/**
+ * Pull text out of a message record.
+ *
+ * Committed events nest the message one level down
+ * (`{ message: { content: [...] } }`); older shapes put it at the root, so both
+ * are accepted.
+ */
+export function messageText(data) {
+  const message = data?.message ?? data
   if (typeof message?.text === 'string') return message.text
   if (!Array.isArray(message?.content)) return ''
   return message.content
@@ -101,37 +109,45 @@ export function isBaibaoAgent(agent, workspacePath) {
 }
 
 /**
- * Latest user message of the current turn, or null when unavailable.
- * Anything unexpected degrades to null instead of throwing.
+ * Recent durable events of this agent's session.
+ *
+ * `sessionQuery` has no `readSurface` — calling it threw, and the catch below
+ * turned every recall into a silent no-op. `sessionController.page` is the
+ * documented read: it takes a SessionAddress and returns committed records.
  */
-export async function readLatestUserMessage(ctx, agent) {
-  const query = ctx.get('sessionQuery')
-  if (query === undefined) return null
+async function readSessionRecords(ctx, agent, maxMessages) {
+  const controller = ctx.get('sessionController')
+  if (controller === undefined || typeof controller.page !== 'function') return []
   try {
-    const surface = await query.readSurface(agent.id)
-    const users = (surface?.events ?? []).filter((event) => event.type === 'user/message')
-    const latest = users[users.length - 1]
-    return latest === undefined ? null : messageText(latest.data)
+    const page = await controller.page(
+      { address: { kind: 'session', sessionId: agent.id }, maxMessages },
+      AbortSignal.timeout(10_000),
+    )
+    return Array.isArray(page?.records) ? page.records : []
   } catch {
-    return null
+    return []
   }
+}
+
+/** Latest user message of the current turn, or null when unavailable. */
+export async function readLatestUserMessage(ctx, agent) {
+  const records = await readSessionRecords(ctx, agent, 20)
+  const users = records.filter((record) => record?.event?.type === 'user/message')
+  const latest = users[users.length - 1]
+  if (latest === undefined) return null
+  const text = messageText(latest.event?.data).trim()
+  return text === '' ? null : text
 }
 
 /** Newest-first user messages of this agent's surface, capped. */
 export async function readRecentUserMessages(ctx, agent, limit = 6) {
-  const query = ctx.get('sessionQuery')
-  if (query === undefined) return []
-  try {
-    const surface = await query.readSurface(agent.id)
-    const users = (surface?.events ?? []).filter((event) => event.type === 'user/message')
-    return users
-      .slice(-limit)
-      .map((event) => messageText(event.data).trim())
-      .filter((text) => text !== '')
-      .reverse()
-  } catch {
-    return []
-  }
+  const records = await readSessionRecords(ctx, agent, 40)
+  const users = records.filter((record) => record?.event?.type === 'user/message')
+  return users
+    .slice(-limit)
+    .map((record) => messageText(record.event?.data).trim())
+    .filter((text) => text !== '')
+    .reverse()
 }
 
 export function renderMemoryContext(entries) {
