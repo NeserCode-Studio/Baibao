@@ -31,6 +31,8 @@
 
   /* The shell's own border token is 4% alpha, which disappears on white. */
   --bb-border: color-mix(in srgb, var(--bb-foreground) 14%, transparent);
+  /* Switch track: darker than a border, so the thumb reads against it. */
+  --bb-track: color-mix(in srgb, var(--bb-foreground) 24%, transparent);
 
   --bb-primary: var(--dsw-alias-brand-primary, #4f6ef7);
   --bb-primary-foreground: var(--dsw-alias-bg-base, #ffffff);
