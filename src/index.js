@@ -35,51 +35,105 @@ let presetsResolve = null
 // `agent/created` handler, so the preset must not carry its own hardcoded
 // prefix: a stale copy would silently override the user's edits in the very
 // path that always composes this preset.
-const BAOBAO_PLUGINS = [
-  {
-    id: 'tool-fs',
-    name: '@deepseek-ai/dsh-tool-fs',
-    config: { read: true, readImage: true, write: true, edit: true },
-  },
-  {
-    id: 'compaction',
-    name: 'cordis:group',
-    group: true,
-    isolate: { compaction: true },
-    config: [
-      { id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic' },
-      { id: 'command-compact', name: '@deepseek-ai/dsh-command-compact' },
-    ],
-  },
-  {
-    id: 'terminal',
-    name: 'cordis:group',
-    group: true,
-    isolate: { terminals: true },
-    config: [
-      { id: 'pty', name: '@deepseek-ai/dsh-terminal' },
-      {
-        id: 'terminal-shell',
-        name: '@deepseek-ai/dsh-terminal-bash',
-        config: {
-          shellDialect: process.platform === 'win32' ? 'pwsh' : 'bash',
-          timeoutMs: 300000,
-        },
-      },
-      process.platform === 'win32'
-        ? {
-            id: 'persistent-shell',
-            name: '@deepseek-ai/dsh-tool-pwsh-persistent',
-            config: { timeoutMs: 300000 },
-          }
-        : {
-            id: 'persistent-shell',
-            name: '@deepseek-ai/dsh-tool-bash-persistent',
-            config: { timeoutMs: 300000 },
+/**
+ * Decide whether a shell can be driven through a PTY on this machine.
+ *
+ * A plain `spawn` probe is NOT sufficient: PowerShell 7 installed from the
+ * Store is a 0-byte app-execution-alias reparse point. `CreateProcess` follows
+ * it, so a naive spawn check reports success, while conpty cannot execute it
+ * and the PTY dies at startup. The reliable signal is therefore the file
+ * itself: a zero-length reparse point is an alias, not a real executable.
+ */
+async function isPtySafeShell(command) {
+  if (process.platform !== 'win32') return true
+  const { execFile } = await import('node:child_process')
+  const resolved = await new Promise((resolve) => {
+    execFile('where', [command], (error, stdout) => {
+      resolve(
+        error
+          ? null
+          : stdout
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter((line) => line !== '')[0],
+      )
+    })
+  })
+  if (resolved === null) return false
+  const { stat } = await import('node:fs/promises')
+  try {
+    const info = await stat(resolved)
+    // An app-execution-alias stub is exactly 0 bytes and carries a reparse
+    // point; a genuine install has a real image on disk.
+    if (info.size === 0) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Pick the terminal shell for this machine.
+ *
+ * Prefers PowerShell 7, and falls back to Windows PowerShell 5.1 when pwsh is
+ * only an app-execution alias (Store install under conpty) or is missing.
+ * Returns the dialect name the terminal plugin understands.
+ */
+async function resolveShellDialect() {
+  if (process.platform !== 'win32') return 'bash'
+  const safe = await isPtySafeShell('pwsh')
+  return safe ? 'pwsh' : 'powershell'
+}
+
+function baibaoPlugins(shellDialect) {
+  return [
+    {
+      id: 'tool-fs',
+      name: '@deepseek-ai/dsh-tool-fs',
+      config: { read: true, readImage: true, write: true, edit: true },
+    },
+    {
+      id: 'compaction',
+      name: 'cordis:group',
+      group: true,
+      isolate: { compaction: true },
+      config: [
+        { id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic' },
+        { id: 'command-compact', name: '@deepseek-ai/dsh-command-compact' },
+      ],
+    },
+    {
+      id: 'terminal',
+      name: 'cordis:group',
+      group: true,
+      isolate: { terminals: true },
+      config: [
+        { id: 'pty', name: '@deepseek-ai/dsh-terminal' },
+        {
+          id: 'terminal-shell',
+          name: '@deepseek-ai/dsh-terminal-bash',
+          config: {
+            shellDialect,
+            timeoutMs: 300000,
           },
-    ],
-  },
-]
+        },
+        // The persistent shell mirrors the dialect: a pwsh session cannot drive
+        // a powershell-only machine and vice versa.
+        shellDialect === 'pwsh'
+          ? {
+              id: 'persistent-shell',
+              name: '@deepseek-ai/dsh-tool-pwsh-persistent',
+              config: { timeoutMs: 300000 },
+            }
+          : {
+              id: 'persistent-shell',
+              name: '@deepseek-ai/dsh-tool-powershell-persistent',
+              config: { timeoutMs: 300000 },
+            },
+      ],
+    },
+  ]
+}
 
 async function ensureBaibaoPreset(presets) {
   if (presets === undefined) return false
@@ -91,7 +145,7 @@ async function ensureBaibaoPreset(presets) {
       name: '百宝',
       description: '百宝的默认 Agent 模式：长期助手人格、文件与终端工具。',
       order: 20,
-      plugins: BAOBAO_PLUGINS,
+      plugins: baibaoPlugins(await resolveShellDialect()),
     })
     return true
   } catch {
@@ -1470,14 +1524,146 @@ export function apply(ctx) {
       'dsh-baibao: persona route',
     )
 
+    // TEMPORARY (PTY): diagnose "PTY shell exited during startup". Reports what
+    // the terminal plugin would actually have to spawn, without starting one.
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/spike/pty',
+          handler: async (_request, response) => {
+            const report = { ok: true, platform: process.platform }
+            const which = async (cmd) => {
+              const { execFile } = await import('node:child_process')
+              return new Promise((resolve) => {
+                execFile(
+                  process.platform === 'win32' ? 'where' : 'which',
+                  [cmd],
+                  (error, stdout) => {
+                    resolve(
+                      error
+                        ? null
+                        : stdout
+                            .split(/\r?\n/)
+                            .map((line) => line.trim())
+                            .filter((line) => line !== ''),
+                    )
+                  }
+                )
+              })
+            }
+            report.shellDialect = process.platform === 'win32' ? 'pwsh' : 'bash'
+            report.pwsh = await which('pwsh')
+            report.powershell = await which('powershell')
+            report.bash = await which('bash')
+            report.wsl = await which('wsl')
+            // The PATH DSH itself sees, so a mismatch with the shell is visible.
+            report.path = (process.env.PATH ?? '').split(';').filter((p) => p !== '')
+            report.hasWindowsApps = report.path.some((p) =>
+              p.toLowerCase().includes('windowsapps')
+            )
+            // `where` resolving is not enough: WindowsApps holds 0-byte reparse
+            // points that some spawn paths (notably conpty) cannot execute. Try
+            // the real thing and report what actually happens.
+            const { spawn } = await import('node:child_process')
+            const probe = async (label, cmd, args) => {
+              const started = Date.now()
+              return new Promise((resolve) => {
+                let out = ''
+                let err = ''
+                const child = spawn(cmd, args, {
+                  stdio: ['ignore', 'pipe', 'pipe'],
+                  windowsHide: true,
+                })
+                child.stdout?.on('data', (chunk) => {
+                  out += String(chunk)
+                })
+                child.stderr?.on('data', (chunk) => {
+                  err += String(chunk)
+                })
+                child.on('error', (error) => {
+                  resolve({
+                    label,
+                    cmd,
+                    ok: false,
+                    error: error.code ?? error.message,
+                    elapsedMs: Date.now() - started,
+                  })
+                })
+                child.on('exit', (code, signal) => {
+                  resolve({
+                    label,
+                    cmd,
+                    ok: code === 0,
+                    code,
+                    signal,
+                    out: out.trim().slice(0, 120),
+                    err: err.trim().slice(0, 200),
+                    elapsedMs: Date.now() - started,
+                  })
+                })
+                setTimeout(() => {
+                  child.kill()
+                  resolve({ label, cmd, ok: false, error: 'timeout', elapsedMs: Date.now() - started })
+                }, 8000)
+              })
+            }
+            report.spawn = [
+              await probe('pwsh (PATH)', 'pwsh', ['-NoProfile', '-Command', 'echo pong']),
+              await probe('pwsh (absolute)', report.pwsh?.[0] ?? '', ['-NoProfile', '-Command', 'echo pong']),
+              await probe('powershell (PATH)', 'powershell', ['-NoProfile', '-Command', 'echo pong']),
+            ].filter((entry) => entry.cmd !== '')
+
+            // Inspect the terminal plugin's real config schema instead of
+            // guessing which keys `shellDialect` accepts. `ctx.inspect` is the
+            // documented surface for this; fall back gracefully if absent.
+            try {
+              const inspect = ctx.inspect
+              if (typeof inspect === 'function') {
+                const tree = await inspect()
+                const flat = JSON.stringify(tree)
+                report.inspectAvailable = true
+                report.terminalPluginKeys = []
+                const walk = (node) => {
+                  if (node === null || typeof node !== 'object') return
+                  if (Array.isArray(node)) {
+                    node.forEach(walk)
+                    return
+                  }
+                  const name = typeof node.name === 'string' ? node.name : ''
+                  if (name.includes('dsh-terminal-bash') || name.includes('dsh-terminal')) {
+                    report.terminalPluginKeys.push({
+                      name,
+                      config: node.config ?? null,
+                      schema: node.schema ?? null,
+                    })
+                  }
+                  for (const key of Object.keys(node)) {
+                    if (key === 'config' || key === 'schema') continue
+                    walk(node[key])
+                  }
+                }
+                walk(tree)
+                report.inspectSize = flat.length
+              } else {
+                report.inspectAvailable = false
+              }
+            } catch (error) {
+              report.inspectError = error instanceof Error ? error.message : String(error)
+            }
+            sendJson(response, 200, report)
+          },
+        }),
+      'dsh-baibao: pty diagnostic',
+    )
+
     // TEMPORARY (S6): shape probe for the `llm` service. Removed once the real
     // signature is recorded; it only reads and never mutates state.
     hostCtx.effect(
       () =>
         webServer.register({
           kind: 'exact',
-          path: '/dsh-baibao/api/spike/llm',
-          handler: async (request, response) => {
+          path: '/dsh-baibao/api/spike/llm',          handler: async (request, response) => {
             const url = new URL(request.url ?? '/', 'http://localhost')
             const mode = url.searchParams.get('mode') ?? 'shape'
             const llm = ctx.get('llm')
