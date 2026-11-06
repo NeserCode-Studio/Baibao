@@ -45,26 +45,27 @@ export function registerChannelRoutes(ctx, hostCtx) {
         handler: async (request, response) => {
           const report = { build: BUILD, agents: [] }
           try {
-            // Force the next turn onto a fresh session, and therefore a fresh
-            // agent holding the current tool definitions.
-            if (request.url !== undefined && request.url.includes('recycle=1')) {
+            // Restore archives this session's earlier mistake created. Archiving
+            // removed conversations from the workspace registry, which made every
+            // list surface report zero even though the logs were intact.
+            if (request.url !== undefined && request.url.includes('restore=1')) {
               const workspaces = ctx.get('workspaceController')
               const { listSessionLogs } = await import('../channels/session-files.js')
-              const stale = listSessionLogs(80).filter(
+              const rows = listSessionLogs(200).filter(
                 (row) => row.title.startsWith('QQ ·') || row.title.startsWith('微信 ·'),
               )
-              report.archived = []
-              for (const row of stale) {
+              report.restored = []
+              for (const row of rows) {
                 try {
-                  await workspaces.archiveSession({ sessionId: row.id })
-                  report.archived.push(row.id.slice(8, 16))
-                } catch (caught) {
-                  report.archived.push(`${row.id.slice(8, 16)}:${caught instanceof Error ? caught.message : 'fail'}`)
+                  await workspaces.unarchiveSession({ sessionId: row.id })
+                  report.restored.push(row.id.slice(8, 16))
+                } catch {
+                  // Already active.
                 }
               }
             }
           } catch (caught) {
-            report.recycleError = caught instanceof Error ? caught.message : String(caught)
+            report.restoreError = caught instanceof Error ? caught.message : String(caught)
           }
           try {
             // List first: reading a log records why it failed, and the store line
