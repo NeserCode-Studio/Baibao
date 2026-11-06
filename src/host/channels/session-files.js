@@ -295,19 +295,49 @@ export function readArchivedIds() {
   }
 }
 
+/** The workspace registry plus the archive set, read once per call. */
+function readRegistry() {
+  try {
+    const file = path.join(dshHome(), 'storages', 'workspace.json')
+    const data = JSON.parse(readFileSync(file, 'utf8'))
+    const workspaces = data?.tables?.workspaces
+    const ids = data?.global?.archivedSessionIds
+    return {
+      workspaces:
+        workspaces !== null && typeof workspaces === 'object' ? Object.values(workspaces) : [],
+      archived: new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []),
+    }
+  } catch {
+    // An unreadable registry means "nothing known", not "everything visible".
+    return { workspaces: [], archived: new Set() }
+  }
+}
+
 /**
- * Sessions belonging to one workspace, newest first, excluding archived ones.
+ * Sessions belonging to one workspace, newest first.
  *
- * Without `workspacePath` every live session on disk is returned, which is what
- * made the list unwieldy: nine workspaces, 131 conversations.
+ * Membership comes from the workspace registry's own `sessionIds`, not from
+ * matching `cwd`. A workspace lists the conversations it shows in the sidebar;
+ * filtering by directory instead pulled in every conversation ever run against
+ * that path, including ones the user had archived or simply never kept.
+ *
+ * Archived ids are removed so the list agrees with what the sidebar displays.
  */
 export function listWorkspaceSessions(workspacePath, limit = MAX_SESSIONS) {
   const want = normalizeCwd(workspacePath)
-  const archived = readArchivedIds()
-  const rows = listSessionLogs(Math.max(limit * 4, 160)).filter((row) => !archived.has(row.id))
-  if (want === '') return rows.slice(0, limit)
-  const matched = rows.filter((row) => normalizeCwd(readHeader(row.file)?.cwd) === want)
-  return matched.slice(0, limit)
+  const registry = readRegistry()
+  const workspace = registry.workspaces.find(
+    (item) => item !== null && typeof item === 'object' && normalizeCwd(item.path) === want,
+  )
+  if (workspace === undefined) return []
+
+  const live = (Array.isArray(workspace.sessionIds) ? workspace.sessionIds : []).filter(
+    (id) => typeof id === 'string' && !registry.archived.has(id),
+  )
+  const known = new Map(listSessionLogs(400).map((row) => [row.id, row]))
+  const rows = live.map((id) => known.get(id)).filter((row) => row !== undefined)
+  rows.sort((left, right) => right.updatedAt - left.updatedAt)
+  return rows.slice(0, limit)
 }
 
 /**
