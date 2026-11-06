@@ -1,73 +1,125 @@
 /**
  * Tools that let Baibao look across its own conversations.
  *
- * The persona is one assistant reached through several apps, and a person may
- * mention something said elsewhere: "the picture I sent you on QQ". Memory
- * entries are already global, but the actual dialogue lives in sessions, so
- * these tools expose the documented session APIs:
+ * These use `sessionQuery` rather than `sessionController`, and the difference
+ * matters. The controller's `list` and `search` go through
+ * `ctx.remoteAccess.allows(...)`, which admits only the caller's own session —
+ * so from a QQ conversation they report "no other conversations" while a dozen
+ * exist on disk. The query service works on the corpus directly, with no
+ * per-caller filtering:
  *
- *   search({ query })                        → { items: [{ sessionId, snippet }] }
- *   list({ cursor })                         → { items: SessionSummary[] }
- *   page({ address, maxMessages }, signal)   → { records }
+ *   filterSessions(filters, signal)        → SessionRecord[]  ([] = all)
+ *   readTitleSnapshots(ids, signal)        → titles
+ *   readSurface(sessionId)                 → { events } with message payloads
+ *   filterEvents(sessionId, filters)       → matching documents carrying text
  *
- * Each tool returns a plain string with a `{ type: 'string' }` output schema,
- * matching `memory_search`. Object schemas here produced
- * "Cannot read properties of undefined (reading 'length')" inside `render`,
- * which the model saw as a broken tool — the same failure mode as the earlier
- * silent `catch`: a wrong shape that reports nothing useful.
+ * Verified against packages/session-query: all four sit on the inherited
+ * prototype, which is why an earlier probe of own properties missed them.
  *
- * Reading is deliberately explicit: the agent searches or names a session, it
- * never silently loads everything.
+ * Every tool returns a plain string with a `{ type: 'string' }` schema, matching
+ * `memory_search` — object schemas here produced render failures.
  */
 
-/** Turn a page record into `{ role, text }`, or null when it carries no text. */
-export function readRecord(record) {
-  const event = record?.event
-  const type = typeof event?.type === 'string' ? event.type : ''
-  const role = type.startsWith('user/') ? 'user' : type.startsWith('assistant/') ? 'assistant' : ''
-  if (role === '') return null
-  const message = event?.data?.message ?? event?.data
-  if (typeof message?.text === 'string') return { role, text: message.text.trim() }
-  if (!Array.isArray(message?.content)) return null
-  const text = message.content
-    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text)
-    .join(' ')
-    .trim()
-  return text === '' ? null : { role, text }
+/** Message lines out of one surface event list. */
+function surfaceMessages(events) {
+  const out = []
+  for (const event of Array.isArray(events) ? events : []) {
+    const type = typeof event?.type === 'string' ? event.type : ''
+    const role = type.startsWith('user/') ? 'user' : type.startsWith('assistant/') ? 'assistant' : ''
+    if (role === '') continue
+    const message = event?.data?.message ?? event?.data
+    let text = ''
+    if (typeof message?.text === 'string') text = message.text
+    else if (Array.isArray(message?.content)) {
+      text = message.content
+        .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+        .map((block) => block.text)
+        .join(' ')
+    }
+    text = text.trim()
+    if (text !== '') out.push({ role, text })
+  }
+  return out
 }
 
-/** Latest messages of one session, oldest first. */
-async function readSession(ctx, sessionId, limit) {
-  const controller = ctx.get('sessionController')
-  if (controller === undefined) return []
-  const page = await controller.page(
-    { address: { kind: 'session', sessionId }, maxMessages: limit },
-    AbortSignal.timeout(15_000),
-  )
-  const records = Array.isArray(page?.records) ? page.records : []
-  return records.flatMap((record) => {
-    const line = readRecord(record)
-    return line === null ? [] : [line]
-  })
+/** Every conversation, newest first, with titles when they exist. */
+async function listSessions(ctx, limit) {
+  const query = ctx.get('sessionQuery')
+  if (query === undefined || typeof query.filterSessions !== 'function') return []
+  const signal = AbortSignal.timeout(15_000)
+  const records = await query.filterSessions([], signal)
+  const rows = []
+  for (const record of Array.isArray(records) ? records : []) {
+    const id = record?.header?.id
+    if (typeof id !== 'string' || id === '') continue
+    rows.push({
+      id,
+      createdAt: Number.isFinite(record.header?.createdAt) ? record.header.createdAt : 0,
+      live: record.live === true,
+    })
+  }
+  rows.sort((left, right) => right.createdAt - left.createdAt)
+  const top = rows.slice(0, limit)
+
+  // One batched title read rather than a call per session.
+  let titles = new Map()
+  try {
+    if (typeof query.readTitleSnapshots === 'function') {
+      const snapshots = await query.readTitleSnapshots(top.map((row) => row.id), signal)
+      const entries = Array.isArray(snapshots) ? snapshots : []
+      for (const entry of entries) {
+        const id = entry?.sessionId ?? entry?.id
+        const title = entry?.title?.title ?? entry?.titleSnapshot?.title ?? entry?.title
+        if (typeof id === 'string' && typeof title === 'string') titles.set(id, title)
+      }
+    }
+  } catch {
+    // A missing title is cosmetic; the id still works.
+  }
+  return top.map((row) => ({ ...row, title: titles.get(row.id) ?? '' }))
 }
 
-/** Shared output shape: text in, text out, with a guard for an empty value. */
-const stringOutput = (fallback) => ({
-  schema: { type: 'string' },
-  render: (value) => [
-    { type: 'text', text: typeof value === 'string' && value.trim() !== '' ? value : fallback },
-  ],
-})
+function formatSession(row) {
+  const when = row.createdAt > 0 ? new Date(row.createdAt).toISOString().slice(0, 16) : '?'
+  const label = row.title === '' ? '' : `${row.title} `
+  return `[${row.id}] ${label}(${when}${row.live ? ' 进行中' : ''})`
+}
 
 export function sessionTools(ctx) {
   return [
     {
+      name: 'session_list',
+      description: [
+        'List this user\u2019s past conversations, newest first, with the title each one was given.',
+        'Titles name the app the conversation happened in (QQ / 微信), which is how you find the one somebody means when they say "on WeChat I told you".',
+        'Use session_read to see what was actually said.',
+      ].join(' '),
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      output: {
+        schema: { type: 'string' },
+        render: (value) => [
+          {
+            type: 'text',
+            text: typeof value === 'string' && value.trim() !== '' ? value : '没有其他会话。',
+          },
+        ],
+      },
+      execute: async () => {
+        try {
+          const rows = await listSessions(ctx, 30)
+          if (rows.length === 0) return '没有其他会话。'
+          return rows.map(formatSession).join('\n')
+        } catch (error) {
+          return `列表失败：${error instanceof Error ? error.message : String(error)}`
+        }
+      },
+    },
+    {
       name: 'session_search',
       description: [
-        'Search across all of your own past conversations with this user.',
-        'Use it when they refer to something said elsewhere — "what I told you on QQ", "the thing we discussed last week".',
-        'Returns session ids with a matching snippet; follow up with session_read to see the surrounding messages.',
+        'Search the text of this user\u2019s past conversations, across every app they talk to you on.',
+        'Use it when they refer to something said elsewhere — "what did I tell you on WeChat".',
+        'Returns the conversation and the matching line; follow with session_read for context.',
       ].join(' '),
       parameters: {
         type: 'object',
@@ -77,54 +129,41 @@ export function sessionTools(ctx) {
         required: ['query'],
         additionalProperties: false,
       },
-      output: stringOutput('没有找到相关的过往对话。'),
+      output: {
+        schema: { type: 'string' },
+        render: (value) => [
+          {
+            type: 'text',
+            text: typeof value === 'string' && value.trim() !== '' ? value : '没有找到相关的过往对话。',
+          },
+        ],
+      },
       execute: async (input) => {
-        const controller = ctx.get('sessionController')
-        if (controller === undefined) return '会话检索不可用。'
+        const query = ctx.get('sessionQuery')
+        const text = String(input.query ?? '').trim()
+        if (text === '') return '没有给出关键词。'
+        if (query === undefined || typeof query.filterEvents !== 'function') {
+          return '会话检索不可用。'
+        }
         try {
-          // The signature is search(request, signal); omitting the signal makes the
-          // call return an empty list rather than complain.
-          const result = await controller.search(
-            { query: String(input.query ?? '') },
-            AbortSignal.timeout(15_000),
-          )
-          const items = Array.isArray(result?.items) ? result.items : []
-          if (items.length === 0) return '没有找到相关的过往对话。'
-          return items
-            .slice(0, 10)
-            .map((item) => `[${String(item.sessionId)}] ${String(item.snippet ?? '').slice(0, 200)}`)
-            .join('\n')
+          const rows = await listSessions(ctx, 30)
+          const hits = []
+          for (const row of rows) {
+            let documents = []
+            try {
+              documents = await query.filterEvents(row.id, [{ kind: 'text', text }])
+            } catch {
+              continue
+            }
+            for (const document of Array.isArray(documents) ? documents.slice(0, 3) : []) {
+              const snippet = String(document?.text ?? '').replace(/\s+/g, ' ').slice(0, 160)
+              if (snippet !== '') hits.push(`[${row.id}] ${row.title} · ${snippet}`)
+            }
+            if (hits.length >= 12) break
+          }
+          return hits.length === 0 ? '没有找到相关的过往对话。' : hits.join('\n')
         } catch (error) {
           return `检索失败：${error instanceof Error ? error.message : String(error)}`
-        }
-      },
-    },
-    {
-      name: 'session_list',
-      description: [
-        'List the recent conversations with this user, newest first.',
-        'Titles show which app a conversation happened in (QQ / 微信), so this is how you find the session someone is referring to when you do not know its id.',
-      ].join(' '),
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
-      output: stringOutput('没有其他会话。'),
-      execute: async () => {
-        const controller = ctx.get('sessionController')
-        if (controller === undefined) return '会话列表不可用。'
-        try {
-          const result = await controller.list({}, AbortSignal.timeout(15_000))
-          const items = Array.isArray(result?.items) ? result.items : []
-          if (items.length === 0) return '没有其他会话。'
-          return items
-            .slice(0, 20)
-            .map((item) => {
-              const when = Number.isFinite(item.updatedAt)
-                ? new Date(item.updatedAt).toISOString().slice(0, 16)
-                : '?'
-              return `[${String(item.sessionId)}] ${when}${item.running === true ? ' (进行中)' : ''}`
-            })
-            .join('\n')
-        } catch (error) {
-          return `列表失败：${error instanceof Error ? error.message : String(error)}`
         }
       },
     },
@@ -132,7 +171,7 @@ export function sessionTools(ctx) {
       name: 'session_read',
       description: [
         'Read the most recent messages of one conversation by its session id.',
-        'Use this after session_search or session_list to see what was actually said.',
+        'Use it after session_search or session_list to see what was actually said.',
         'It reads only that conversation; it cannot read files.',
       ].join(' '),
       parameters: {
@@ -144,22 +183,35 @@ export function sessionTools(ctx) {
           },
           limit: {
             type: 'number',
-            description: 'How many recent messages to read, 1-30. Defaults to 10.',
+            description: 'How many recent messages to read, 1-40. Defaults to 15.',
           },
         },
         required: ['sessionId'],
         additionalProperties: false,
       },
-      output: stringOutput('那个会话没有可读的文字内容。'),
+      output: {
+        schema: { type: 'string' },
+        render: (value) => [
+          {
+            type: 'text',
+            text: typeof value === 'string' && value.trim() !== '' ? value : '那个会话没有可读文字。',
+          },
+        ],
+      },
       execute: async (input) => {
-        const limit = Number.isFinite(input.limit)
-          ? Math.min(Math.max(Math.trunc(input.limit), 1), 30)
-          : 10
-        const sessionId = String(input.sessionId ?? '')
+        const query = ctx.get('sessionQuery')
+        const sessionId = String(input.sessionId ?? '').trim()
         if (sessionId === '') return '没有指定会话。'
+        if (query === undefined || typeof query.readSurface !== 'function') {
+          return '会话读取不可用。'
+        }
+        const limit = Number.isFinite(input.limit)
+          ? Math.min(Math.max(Math.trunc(input.limit), 1), 40)
+          : 15
         try {
-          const messages = await readSession(ctx, sessionId, limit)
-          if (messages.length === 0) return '那个会话没有可读的文字内容。'
+          const surface = await query.readSurface(sessionId)
+          const messages = surfaceMessages(surface?.events).slice(-limit)
+          if (messages.length === 0) return '那个会话没有可读文字。'
           return messages
             .map((line) => `${line.role === 'user' ? '用户' : '我'}：${line.text}`)
             .join('\n')
