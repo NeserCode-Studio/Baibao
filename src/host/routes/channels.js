@@ -27,6 +27,7 @@ import {
   writeIdentity,
 } from '../channels/store.js'
 import { BUILD } from '../build.js'
+import { readLog, listSessionLogs, describeSessionStore } from '../channels/session-files.js'
 import { readJson, sendJson } from '../util.js'
 
 export function registerChannelRoutes(ctx, hostCtx) {
@@ -43,6 +44,45 @@ export function registerChannelRoutes(ctx, hostCtx) {
         path: '/dsh-baibao/api/debug/agents',
         handler: async (request, response) => {
           const report = { build: BUILD, agents: [] }
+          try {
+            // Force the next turn onto a fresh session, and therefore a fresh
+            // agent holding the current tool definitions.
+            if (request.url !== undefined && request.url.includes('recycle=1')) {
+              const workspaces = ctx.get('workspaceController')
+              const { listSessionLogs } = await import('../channels/session-files.js')
+              const stale = listSessionLogs(80).filter(
+                (row) => row.title.startsWith('QQ ·') || row.title.startsWith('微信 ·'),
+              )
+              report.archived = []
+              for (const row of stale) {
+                try {
+                  await workspaces.archiveSession({ sessionId: row.id })
+                  report.archived.push(row.id.slice(8, 16))
+                } catch (caught) {
+                  report.archived.push(`${row.id.slice(8, 16)}:${caught instanceof Error ? caught.message : 'fail'}`)
+                }
+              }
+            }
+          } catch (caught) {
+            report.recycleError = caught instanceof Error ? caught.message : String(caught)
+          }
+          try {
+            // List first: reading a log records why it failed, and the store line
+            // reports that reason. Calling describe first hid it.
+            const rows = listSessionLogs(3)
+            report.storeTitles = rows.map((row) => `${row.id.slice(8, 16)} [${row.title}]`)
+            report.store = describeSessionStore()
+            report.logProbe = rows.map((row) => {
+              const records = readLog(row.file)
+              return {
+                id: row.id.slice(8, 16),
+                records: records.length,
+                types: records.slice(0, 10).map((item) => String(item?.type ?? '?')),
+              }
+            })
+          } catch (caught) {
+            report.storeError = caught instanceof Error ? caught.message : String(caught)
+          }
           try {
             const agents = ctx.get('agents')
             const list = typeof agents?.list === 'function' ? agents.list() : []

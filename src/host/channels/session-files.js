@@ -58,15 +58,81 @@ function eventTitle(record) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
+/** zstd frame magic, used to split an append-written multi-frame log. */
+const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd]
+
+/**
+ * Decompress every frame in an append-written zstd log.
+ *
+ * DSH writes one frame per append, so a finished log is a concatenation of
+ * frames. Node 24.22's `zstdDecompressSync` walks all of them; the 24.21 build
+ * embedded in the desktop app stops after the first, returning only the session
+ * header. That difference is invisible — no error, just one record instead of
+ * twenty-four — which is why every conversation looked empty while the files
+ * were plainly full.
+ *
+ * Both paths are tried and the richer result wins, so whichever runtime this
+ * runs on, it gets the whole log.
+ */
+function decompressAll(buffer) {
+  if (zstdDecompress === null) return null
+
+  let whole = null
+  try {
+    whole = zstdDecompress(buffer)
+  } catch {
+    whole = null
+  }
+
+  // Split on frame magic. A magic sequence inside compressed bytes would be a
+  // false split; that frame simply fails to decompress and is skipped.
+  const starts = [0]
+  for (let index = 4; index < buffer.length - 3; index += 1) {
+    if (
+      buffer[index] === ZSTD_MAGIC[0] &&
+      buffer[index + 1] === ZSTD_MAGIC[1] &&
+      buffer[index + 2] === ZSTD_MAGIC[2] &&
+      buffer[index + 3] === ZSTD_MAGIC[3]
+    ) {
+      starts.push(index)
+      index += 3
+    }
+  }
+
+  let joined = null
+  if (starts.length > 1) {
+    const parts = []
+    for (let index = 0; index < starts.length; index += 1) {
+      const end = index + 1 < starts.length ? starts[index + 1] : buffer.length
+      try {
+        parts.push(zstdDecompress(buffer.subarray(starts[index], end)))
+      } catch {
+        // A false split: drop that frame rather than the whole log.
+      }
+    }
+    if (parts.length > 0) joined = Buffer.concat(parts)
+  }
+
+  if (whole === null) return joined
+  if (joined === null) return whole
+  return joined.length >= whole.length ? joined : whole
+}
+
 /** Decode one session log into records, tolerating a truncated file. */
-function readLog(file) {
+export function readLog(file) {
   if (zstdDecompress === null) {
     lastReadError = 'node-without-zstd'
     return []
   }
   let text
   try {
-    text = zstdDecompress(readFileSync(file)).toString('utf8')
+    const buffer = readFileSync(file)
+    const decoded = decompressAll(buffer)
+    if (decoded === null) {
+      lastReadError = 'decompress-failed'
+      return []
+    }
+    text = decoded.toString('utf8')
   } catch (error) {
     lastReadError = error instanceof Error ? (error.code ?? error.message) : 'decompress-failed'
     return []
