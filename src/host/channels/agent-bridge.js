@@ -63,10 +63,10 @@ export function isAssistantEvent(type) {
 /**
  * Create the session for one chat, or reuse the live one.
  *
- * The session is also attached to the Baibao workspace through
- * `insertSessionBefore`. Workspace membership is an explicit `sessionIds` array
- * rather than something derived from `cwd`, so without that call the session
- * shows up under "ungrouped" even though its working directory is right.
+ * The session must be created with `workspaceId`, not `cwd`: the two are
+ * exclusive in `SessionCreateRequest`, and a session created by `cwd` belongs to
+ * no workspace at all — which is why it surfaced under "ungrouped" even though
+ * its directory was right.
  *
  * A disposed or archived session must not wedge the channel forever, so the
  * caller rebuilds on failure rather than caching blindly.
@@ -91,16 +91,10 @@ async function ensureSession(ctx, key) {
   await mkdir(workspaceDir, { recursive: true })
   // Idempotent: resolves the existing Baibao workspace when there is one.
   const { workspace } = await workspaces.create({ path: workspaceDir })
-  const created = await controller.create({ cwd: workspace.path, agentPreset: 'baibao' })
-
-  try {
-    await workspaces.insertSessionBefore({
-      workspaceId: workspace.workspaceId,
-      sessionId: created.sessionId,
-    })
-  } catch {
-    // Grouping is cosmetic; a conversation that works beats one filed neatly.
-  }
+  const created = await controller.create({
+    workspaceId: workspace.workspaceId,
+    agentPreset: 'baibao',
+  })
 
   sessions.set(key, created.sessionId)
   return { controller, sessionId: created.sessionId }
