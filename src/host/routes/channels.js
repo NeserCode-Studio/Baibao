@@ -26,6 +26,7 @@ import {
   writeChannel,
   writeIdentity,
 } from '../channels/store.js'
+import { BUILD } from '../build.js'
 import { readJson, sendJson } from '../util.js'
 
 export function registerChannelRoutes(ctx, hostCtx) {
@@ -42,6 +43,7 @@ export function registerChannelRoutes(ctx, hostCtx) {
               const channels = await readChannels()
               sendJson(response, 200, {
                 ok: true,
+                build: BUILD,
                 channels: CHANNEL_IDS.map((id) => maskChannel(id, channels[id])),
                 status: channelStatus(),
                 pendingSenders: pendingSenders(),

@@ -21,11 +21,22 @@ import {
   readSessionMessages,
   searchSessionLogs,
 } from './session-files.js'
+import { BUILD } from '../build.js'
 
 /** How many recent conversations a search covers. */
 const SEARCH_DEPTH = 20
 /** How many conversations the list shows. */
 const LIST_DEPTH = 20
+/**
+ * Stamped into every empty answer.
+ *
+ * The host routes are provably current (a recent field shows up in their
+ * responses) while these tools keep answering in the wording of an older build.
+ * That difference means the agent is holding tools registered before the last
+ * reload, and without a version marker there is no way to tell from the outside
+ * which copy is talking.
+ */
+const TOOL_BUILD = BUILD
 
 function formatRow(row) {
   const when = row.updatedAt > 0 ? new Date(row.updatedAt).toISOString().slice(0, 16) : '?'
@@ -71,7 +82,7 @@ export function sessionTools(_ctx) {
       execute: async () => {
         try {
           const rows = listSessionLogs(LIST_DEPTH)
-          if (rows.length === 0) return `没有其他会话。诊断：${describeSessionStore()}`
+          if (rows.length === 0) return `没有其他会话。诊断（${TOOL_BUILD}）：${describeSessionStore()}`
           return rows.map(formatRow).join('\n')
         } catch (error) {
           return `列表失败：${error instanceof Error ? error.message : String(error)}`
@@ -99,7 +110,7 @@ export function sessionTools(_ctx) {
         if (text === '') return '没有给出关键词。'
         try {
           const hits = searchSessionLogs(text, SEARCH_DEPTH)
-          if (hits.length === 0) return `没有找到相关的过往对话。诊断：${describeSessionStore()}`
+          if (hits.length === 0) return `没有找到相关的过往对话。诊断（${TOOL_BUILD}）：${describeSessionStore()}`
           return hits
             .slice(0, 12)
             .map((hit) => `[${hit.id}] ${hit.title} · ${hit.snippet}`)
