@@ -72,16 +72,18 @@ async function isPtySafeShell(command) {
 }
 
 /**
- * Pick the terminal shell for this machine.
+ * Pick the `shellDialect` for this machine.
  *
- * Prefers PowerShell 7, and falls back to Windows PowerShell 5.1 when pwsh is
- * only an app-execution alias (Store install under conpty) or is missing.
- * Returns the dialect name the terminal plugin understands.
+ * The plugin only accepts `"bash" | "pwsh"` (DSH rejects anything else and
+ * marks the whole preset broken), so there is no `powershell` value to fall
+ * back to. When pwsh cannot drive a PTY here, `bash` is the remaining legal
+ * option: it resolves to WSL's bash on this machine, which is a real
+ * executable rather than an alias.
  */
 async function resolveShellDialect() {
   if (process.platform !== 'win32') return 'bash'
   const safe = await isPtySafeShell('pwsh')
-  return safe ? 'pwsh' : 'powershell'
+  return safe ? 'pwsh' : 'bash'
 }
 
 function baibaoPlugins(shellDialect) {
