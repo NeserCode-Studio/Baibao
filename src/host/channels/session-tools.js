@@ -33,10 +33,27 @@ function formatRow(row) {
   return `[${row.id}] ${title} · ${when}`
 }
 
+/**
+ * Shared output shape.
+ *
+ * The distinction between `undefined` and an empty string matters: `undefined`
+ * means the tool produced nothing at all — a failed call or a value the renderer
+ * never received — while an empty string is a value that happens to be blank.
+ * Collapsing both into "no conversations" told the user there was nothing to
+ * find when in fact the tool had not run.
+ */
 const stringOutput = (fallback) => ({
   schema: { type: 'string' },
   render: (value) => [
-    { type: 'text', text: typeof value === 'string' && value.trim() !== '' ? value : fallback },
+    {
+      type: 'text',
+      text:
+        value === undefined
+          ? '（工具没有返回内容，执行可能失败了）'
+          : typeof value === 'string' && value.trim() !== ''
+            ? value
+            : fallback,
+    },
   ],
 })
 

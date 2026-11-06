@@ -16,12 +16,21 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { zstdDecompressSync } from 'node:zlib'
+// Namespace import on purpose: a named import of `zstdDecompressSync` throws at
+// module-load time on a Node that predates zstd support (22.15+), which would
+// take the whole plugin down rather than degrade one tool.
+import * as zlib from 'node:zlib'
 import { dshHome } from '../paths.js'
 
 const SESSION_FILE = 'session.v4.jsonl.zstd'
 /** Reading thirty logs is plenty for recall and keeps the turn fast. */
 const MAX_SESSIONS = 30
+
+/** zstd decompression, when this Node provides it. */
+const zstdDecompress = typeof zlib.zstdDecompressSync === 'function' ? zlib.zstdDecompressSync : null
+
+/** Why the last log read failed, for the diagnostics line. */
+let lastReadError = ''
 
 /** Pull the message text out of one parsed event, or null when it has none. */
 function eventMessage(record) {
@@ -51,10 +60,15 @@ function eventTitle(record) {
 
 /** Decode one session log into records, tolerating a truncated file. */
 function readLog(file) {
+  if (zstdDecompress === null) {
+    lastReadError = 'node-without-zstd'
+    return []
+  }
   let text
   try {
-    text = zstdDecompressSync(readFileSync(file)).toString('utf8')
-  } catch {
+    text = zstdDecompress(readFileSync(file)).toString('utf8')
+  } catch (error) {
+    lastReadError = error instanceof Error ? (error.code ?? error.message) : 'decompress-failed'
     return []
   }
   const records = []
@@ -165,7 +179,12 @@ export function findSessionLog(sessionId) {
 export function describeSessionStore() {
   const home = dshHome()
   const root = path.join(home, 'sessions')
-  const parts = [`home=${home}`, `env=${process.env.DSH_HOME ?? '(unset)'}`, `dir=${root}`]
+  const parts = [
+    `node=${process.versions.node}`,
+    `zstd=${zstdDecompress === null ? 'MISSING' : 'ok'}`,
+    `home=${home}`,
+    `env=${process.env.DSH_HOME ?? '(unset)'}`,
+  ]
   try {
     const groups = readdirSync(root)
     parts.push(`groups=${groups.length}`)
@@ -183,5 +202,6 @@ export function describeSessionStore() {
   } catch (error) {
     parts.push(`dirError=${error instanceof Error ? error.code ?? error.message : 'unknown'}`)
   }
+  if (lastReadError !== '') parts.push(`lastReadError=${lastReadError}`)
   return parts.join(' ')
 }
