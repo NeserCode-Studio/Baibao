@@ -19,6 +19,7 @@
  */
 import path from 'node:path'
 import { attachBaibaoAgent } from './host/agent-hook.js'
+import { askAgent } from './host/channels/agent-bridge.js'
 import { configureChannels, sendChannelText, startChannel } from './host/channels/manager.js'
 import { readChannels } from './host/channels/store.js'
 import { defaultRoot, readLocation } from './host/paths.js'
@@ -83,9 +84,8 @@ export function apply(ctx) {
     'dsh-baibao: agent wiring',
   )
 
-  // Channel wiring. The reply path is an echo for now: it proves the round trip
-  // (receive → allow-list → send) end to end before an agent is put in the
-  // middle, so a failure here cannot be confused with an agent problem.
+  // Channel wiring: a message from the phone becomes a real Baibao turn, and
+  // the reply goes back to the same conversation.
   configureChannels({
     log: (level, detail) => {
       console.error(`[baibao:channel] ${level} ${detail}`)
@@ -102,9 +102,15 @@ export function apply(ctx) {
         })
         return
       }
-      await sendChannelText('qq', message.openid, `收到：${message.content}`, {
-        msgId: message.messageId,
+      const reply = await askAgent(ctx, message.content, {
+        log: (level, detail) => console.error(`[baibao:channel] ${level} ${detail}`),
       })
+      await sendChannelText(
+        'qq',
+        message.openid,
+        reply === '' ? '这条我没能及时回答，你可以在百宝里继续问。' : reply,
+        { msgId: message.messageId },
+      )
     },
   })
 
