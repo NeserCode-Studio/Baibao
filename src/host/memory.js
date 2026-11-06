@@ -211,7 +211,12 @@ export function memoryTools() {
         render: (value) => [
           {
             type: 'text',
-            text: typeof value === 'string' ? value : '没有找到相关记忆。',
+            text:
+              typeof value === 'string'
+                ? value
+                : typeof value?.text === 'string'
+                  ? value.text
+                  : '没有找到相关记忆。',
           },
         ],
       },
@@ -255,8 +260,7 @@ export function memoryTools() {
             type: 'text',
             text: value?.deleted === true ? `已删除：${value.text ?? ''}` : '没有找到该记忆。',
           },
-        ],
-      },
+        ],      },
       execute: async (input) => {
         const id = typeof input?.id === 'string' && input.id.trim() !== '' ? input.id.trim() : null
         if (id !== null) {

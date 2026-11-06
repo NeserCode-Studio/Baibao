@@ -45,27 +45,34 @@ function formatRow(row) {
 }
 
 /**
- * Shared output shape.
+ * Coerce whatever the renderer hands us into displayable text.
  *
- * The distinction between `undefined` and an empty string matters: `undefined`
- * means the tool produced nothing at all — a failed call or a value the renderer
- * never received — while an empty string is a value that happens to be blank.
- * Collapsing both into "no conversations" told the user there was nothing to
- * find when in fact the tool had not run.
+ * The tool's `execute` has been returning the right data all along — the UI's
+ * "raw result" panel showed a full list of conversations while the rendered
+ * text said there were none. The render callback was receiving something other
+ * than the plain string it assumed and falling through to the fallback, so a
+ * successful lookup displayed as an empty one.
  */
+function toText(value) {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return ''
+    }
+  }
+  return String(value)
+}
+
 const stringOutput = (fallback) => ({
   schema: { type: 'string' },
-  render: (value) => [
-    {
-      type: 'text',
-      text:
-        value === undefined
-          ? '（工具没有返回内容，执行可能失败了）'
-          : typeof value === 'string' && value.trim() !== ''
-            ? value
-            : fallback,
-    },
-  ],
+  render: (value) => {
+    const text = toText(value)
+    return [{ type: 'text', text: text.trim() !== '' ? text : fallback }]
+  },
 })
 
 export function sessionTools(_ctx) {
