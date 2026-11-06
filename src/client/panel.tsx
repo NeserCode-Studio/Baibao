@@ -1302,9 +1302,9 @@ function StatusPill({ state, label }: { state: string; label: string }) {
         ? 'bg-amber-500'
         : state === 'error' || state === 'fatal' || state === 'expired'
           ? 'bg-red-500'
-          : 'bg-muted-foreground/40'
+          : 'bg-muted-foreground'
   return (
-    <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+    <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
       <span className={cn('size-1.5 rounded-full', tone)} aria-hidden="true" />
       {label}
     </span>
@@ -1393,7 +1393,7 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           : 'channelStateIdle'
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+    <div className="rounded-xl border border-border bg-muted p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <h3 className="text-[13px] font-semibold leading-tight text-foreground">
