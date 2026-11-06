@@ -2,35 +2,55 @@
  * Tailwind entry for the Baibao panel.
  *
  * The panel is embedded in the DSH shell, so the theme aliases point at the
- * shell's own design tokens rather than at fixed colours. When the shell
- * switches theme, these follow automatically.
+ * shell's own design tokens rather than at fixed colours.
  *
- * The aliases are declared on `:root` as well as `.bb-root`. The shell defines
- * its `--dsw-alias-*` tokens at the document root, and a rule that resolves them
- * from deeper in the tree silently produced empty colours — a card with no
- * background and no border. Declaring at `:root` costs nothing (the names are
- * `--bb-`prefixed, so nothing else reads them) and guarantees inheritance.
+ * Two things here are not obvious:
  *
- * Every alias carries a literal fallback: if a token is ever renamed upstream,
- * the panel degrades to a readable colour instead of turning transparent.
+ * 1. `border-style: solid` is set explicitly. Tailwind's `border` utility only
+ *    writes `border-width`; the style comes from preflight, which this project
+ *    disables so it cannot restyle the host. Without this rule every border
+ *    computes to 0 regardless of its declared width.
+ *
+ * 2. The shell's three surface tokens all resolve to the same colour, so there
+ *    is no layer hierarchy to borrow. Tints are therefore mixed from the label
+ *    colour against the base surface — that keeps them tied to the theme instead
+ *    of hard-coding greys that break in dark mode.
  */
 @tailwind components;
 @tailwind utilities;
 
 :root,
 .bb-root {
-  /* shadcn's vocabulary, aliased onto the shell's tokens. */
   --bb-background: var(--dsw-alias-bg-base, #ffffff);
   --bb-foreground: var(--dsw-alias-label-primary, #1f2328);
   --bb-surface: var(--dsw-alias-bg-layer-1, #ffffff);
-  --bb-border: var(--dsw-alias-border-l1, #d8dde3);
-  --bb-muted: var(--dsw-alias-bg-layer-2, #f2f4f6);
+
+  /* Surfaces with no hierarchy upstream: derive them from the label colour. */
+  --bb-muted: color-mix(in srgb, var(--bb-foreground) 4%, var(--bb-background));
   --bb-muted-foreground: var(--dsw-alias-label-secondary, #5c6570);
+
+  /* The shell's own border token is 4% alpha, which disappears on white. */
+  --bb-border: color-mix(in srgb, var(--bb-foreground) 14%, transparent);
+
   --bb-primary: var(--dsw-alias-brand-primary, #4f6ef7);
   --bb-primary-foreground: var(--dsw-alias-bg-base, #ffffff);
   --bb-destructive: var(--dsw-alias-state-error-primary, #d93f3f);
   --bb-destructive-foreground: #ffffff;
-  --bb-accent: var(--dsw-alias-bg-layer-2, #f2f4f6);
-  --bb-accent-foreground: var(--dsw-alias-label-primary, #1f2328);
+  --bb-accent: color-mix(in srgb, var(--bb-foreground) 8%, var(--bb-background));
+  --bb-accent-foreground: var(--bb-foreground);
   --bb-ring: var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary, #4f6ef7));
+}
+
+/**
+ * Restore the border box model that preflight would normally provide.
+ *
+ * Scoped to `.bb-root` so nothing reaches the host shell.
+ */
+.bb-root,
+.bb-root *,
+.bb-root *::before,
+.bb-root *::after {
+  border-style: solid;
+  border-color: var(--bb-border);
+  border-width: 0;
 }

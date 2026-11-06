@@ -16,7 +16,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:opacity-90',
+        // Foreground-on-background is self-inverting: in a dark theme the
+        // foreground goes light and the label goes dark, with no separate token
+        // to keep in sync.
+        default: 'bg-foreground text-background hover:opacity-90',
         secondary: 'bg-muted text-foreground hover:bg-accent',
         outline: 'border border-border bg-transparent text-foreground hover:bg-muted',
         ghost: 'text-foreground hover:bg-muted',
