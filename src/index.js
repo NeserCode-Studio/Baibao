@@ -863,6 +863,38 @@ async function searchMemory(query, limit = 10) {
   return entries.slice(0, Math.max(1, Math.min(50, limit)))
 }
 
+const MEMORY_PAGE_SIZE_DEFAULT = 10
+const MEMORY_PAGE_SIZE_MAX = 100
+
+/**
+ * Slice an already-ordered list into one page.
+ *
+ * `page` is clamped to 1 and `pageSize` to [1, 100]; a page past the end comes
+ * back empty while `total` still reports the real count, so the caller can
+ * correct itself instead of showing a blank list with no explanation.
+ */
+function paginateMemories(entries, page, pageSize) {
+  const size = Math.max(
+    1,
+    Math.min(
+      MEMORY_PAGE_SIZE_MAX,
+      Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : MEMORY_PAGE_SIZE_DEFAULT,
+    ),
+  )
+  const requested = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+  const total = entries.length
+  const pageCount = Math.max(1, Math.ceil(total / size))
+  const current = Math.min(requested, pageCount)
+  const start = (current - 1) * size
+  return {
+    entries: entries.slice(start, start + size),
+    total,
+    page: current,
+    pageSize: size,
+    pageCount,
+  }
+}
+
 function memoryTools() {
   return [
     {
@@ -1520,10 +1552,13 @@ export function apply(ctx) {
             try {
               if (request.method === 'GET') {
                 const url = new URL(request.url ?? '/', 'http://localhost')
-                sendJson(response, 200, {
-                  ok: true,
-                  entries: await listMemory(url.searchParams.get('q') ?? ''),
-                })
+                const matched = await listMemory(url.searchParams.get('q') ?? '')
+                const page = paginateMemories(
+                  matched,
+                  Number(url.searchParams.get('page')),
+                  Number(url.searchParams.get('pageSize')),
+                )
+                sendJson(response, 200, { ok: true, ...page })
                 return
               }
 

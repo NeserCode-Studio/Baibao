@@ -11,7 +11,7 @@ import {
   type StorageInfo,
   type StorageMigration,
 } from './storage-api'
-import { deleteMemory, listMemory, type MemoryEntry } from './memory-api'
+import { deleteMemory, listMemory, MEMORY_PAGE_SIZE, type MemoryEntry } from './memory-api'
 import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
 import {
   DEFAULT_JUNG,
@@ -564,16 +564,36 @@ function MemorySection({ t, hidden }: SectionProps) {
 
 function MemoryList({ t }: BaibaoPanelProps) {
   const [entries, setEntries] = useState<MemoryEntry[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageCount, setPageCount] = useState(1)
+  const [pageSize, setPageSize] = useState(MEMORY_PAGE_SIZE)
+  const [query, setQuery] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
+  // Typing hits the host, so debounce before committing the query.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAppliedQuery(query.trim())
+      setPage(1)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [query])
+
   useEffect(() => {
     let live = true
-    void listMemory().then((result) => {
+    setLoading(true)
+    void listMemory(appliedQuery, page).then((result) => {
       if (!live) return
       if (result.ok) {
         setEntries(result.entries)
+        setTotal(result.total)
+        setPage(result.page)
+        setPageCount(result.pageCount)
+        setPageSize(result.pageSize)
         setFailed(false)
       } else {
         setFailed(true)
@@ -583,42 +603,109 @@ function MemoryList({ t }: BaibaoPanelProps) {
     return () => {
       live = false
     }
-  }, [])
+  }, [appliedQuery, page])
 
   const remove = async (id: string): Promise<void> => {
     const result = await deleteMemory(id)
-    if (result.ok) {
-      setEntries((current) => current.filter((entry) => entry.id !== id))
-      setPendingDelete(null)
-      setFailed(false)
-    } else {
+    if (!result.ok) {
       setFailed(true)
+      return
+    }
+    setPendingDelete(null)
+    setFailed(false)
+    // Deleting the last row of a page leaves it empty; step back instead of
+    // showing a blank page with no way forward.
+    if (entries.length === 1 && page > 1) {
+      setPage(page - 1)
+      return
+    }
+    const refreshed = await listMemory(appliedQuery, page)
+    if (refreshed.ok) {
+      setEntries(refreshed.entries)
+      setTotal(refreshed.total)
+      setPage(refreshed.page)
+      setPageCount(refreshed.pageCount)
     }
   }
 
-  if (loading) return <p className="bb-memoryEmpty">{t('memoryLoading')}</p>
-  if (failed) {
-    return (
-      <p className="bb-memoryError" role="alert">
-        {t('memoryFailed')}
-      </p>
-    )
-  }
-  if (entries.length === 0) return <p className="bb-memoryEmpty">{t('memoryEmpty')}</p>
+  const kindLabel = (kind: MemoryEntry['kind']): BaibaoKey =>
+    kind === 'preference'
+      ? 'memoryKindPreference'
+      : kind === 'episode'
+        ? 'memoryKindEpisode'
+        : 'memoryKindFact'
 
-  return (
-    <ul className="bb-memoryList">
-      {entries.map((entry) => {
-        const kindKey: BaibaoKey =
-          entry.kind === 'preference'
-            ? 'memoryKindPreference'
-            : entry.kind === 'episode'
-              ? 'memoryKindEpisode'
-              : 'memoryKindFact'
-        return (
+  const showPager = total > pageSize
+
+  const search = (
+    <div className="bb-memorySearch">
+      <input
+        type="search"
+        className="bb-memorySearchInput"
+        value={query}
+        placeholder={t('memorySearchPlaceholder')}
+        aria-label={t('memorySearch')}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {query !== '' && (
+        <button
+          type="button"
+          className="bb-storageLink"
+          onClick={() => setQuery('')}
+        >
+          {t('memorySearchClear')}
+        </button>
+      )}
+    </div>
+  )
+
+  const pager = showPager ? (
+    <nav className="bb-pager" aria-label={t('memoryPager')}>
+      <button
+        type="button"
+        className="bb-secondaryBtn"
+        disabled={page <= 1}
+        onClick={() => setPage(page - 1)}
+      >
+        {t('memoryPrev')}
+      </button>
+      <span className="bb-pagerStatus">
+        {t('memoryPageOf', { page, count: pageCount })}
+      </span>
+      <button
+        type="button"
+        className="bb-secondaryBtn"
+        disabled={page >= pageCount}
+        onClick={() => setPage(page + 1)}
+      >
+        {t('memoryNext')}
+      </button>
+    </nav>
+  ) : null
+
+  const body = (() => {
+    if (loading) return <p className="bb-memoryEmpty">{t('memoryLoading')}</p>
+    if (failed) {
+      return (
+        <p className="bb-memoryError" role="alert">
+          {t('memoryFailed')}
+        </p>
+      )
+    }
+    if (entries.length === 0) {
+      // An empty search result reads differently from an empty store.
+      return (
+        <p className="bb-memoryEmpty">
+          {appliedQuery === '' ? t('memoryEmpty') : t('memoryNoMatch')}
+        </p>
+      )
+    }
+    return (
+      <ul className="bb-memoryList">
+        {entries.map((entry) => (
           <li key={entry.id} className="bb-memoryItem">
             <div className="bb-memoryTop">
-              <span className="bb-memoryKind">{t(kindKey)}</span>
+              <span className="bb-memoryKind">{t(kindLabel(entry.kind))}</span>
               <span className="bb-memoryDate">
                 {new Date(entry.createdAt).toLocaleDateString()}
               </span>
@@ -660,9 +747,17 @@ function MemoryList({ t }: BaibaoPanelProps) {
               </button>
             )}
           </li>
-        )
-      })}
-    </ul>
+        ))}
+      </ul>
+    )
+  })()
+
+  return (
+    <div className="bb-memoryPanel">
+      {search}
+      {body}
+      {pager}
+    </div>
   )
 }
 

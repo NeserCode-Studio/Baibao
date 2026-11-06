@@ -10,7 +10,14 @@ export interface MemoryEntry {
 }
 
 export type MemoryListResult =
-  | { ok: true; entries: MemoryEntry[] }
+  | {
+      ok: true
+      entries: MemoryEntry[]
+      total: number
+      page: number
+      pageSize: number
+      pageCount: number
+    }
   | { ok: false; error: string }
 
 export type MemoryDeleteResult =
@@ -19,6 +26,8 @@ export type MemoryDeleteResult =
 
 const ROUTE = '/dsh-baibao/api/memory'
 
+export const MEMORY_PAGE_SIZE = 10
+
 function apiPath(path: string): string {
   const relative = path.replace(/^\/+/, '')
   if (typeof document === 'undefined') return `/${relative}`
@@ -26,17 +35,35 @@ function apiPath(path: string): string {
   return `${url.pathname}${url.search}`
 }
 
-export async function listMemory(query = ''): Promise<MemoryListResult> {
+export async function listMemory(
+  query = '',
+  page = 1,
+  pageSize = MEMORY_PAGE_SIZE,
+): Promise<MemoryListResult> {
   try {
-    const search = query === '' ? '' : `?q=${encodeURIComponent(query)}`
-    const response = await fetch(apiPath(`${ROUTE}${search}`), { cache: 'no-store' })
+    const params = new URLSearchParams()
+    if (query !== '') params.set('q', query)
+    params.set('page', String(page))
+    params.set('pageSize', String(pageSize))
+    const response = await fetch(apiPath(`${ROUTE}?${params.toString()}`), { cache: 'no-store' })
     const body = (await response.json()) as {
       ok?: boolean
       entries?: MemoryEntry[]
+      total?: number
+      page?: number
+      pageSize?: number
+      pageCount?: number
       error?: string
     }
     if (body.ok === true && Array.isArray(body.entries)) {
-      return { ok: true, entries: body.entries }
+      return {
+        ok: true,
+        entries: body.entries,
+        total: typeof body.total === 'number' ? body.total : body.entries.length,
+        page: typeof body.page === 'number' ? body.page : page,
+        pageSize: typeof body.pageSize === 'number' ? body.pageSize : pageSize,
+        pageCount: typeof body.pageCount === 'number' ? body.pageCount : 1,
+      }
     }
     return { ok: false, error: body.error ?? `http-${response.status}` }
   } catch {
