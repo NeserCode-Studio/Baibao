@@ -19,6 +19,8 @@
  */
 import path from 'node:path'
 import { attachBaibaoAgent } from './host/agent-hook.js'
+import { configureChannels, sendChannelText, startChannel } from './host/channels/manager.js'
+import { readChannels } from './host/channels/store.js'
 import { defaultRoot, readLocation } from './host/paths.js'
 import { ensureBaibaoPreset } from './host/preset.js'
 import { registerChatRoutes } from './host/routes/chat.js'
@@ -80,6 +82,40 @@ export function apply(ctx) {
       }),
     'dsh-baibao: agent wiring',
   )
+
+  // Channel wiring. The reply path is an echo for now: it proves the round trip
+  // (receive → allow-list → send) end to end before an agent is put in the
+  // middle, so a failure here cannot be confused with an agent problem.
+  configureChannels({
+    log: (level, detail) => {
+      console.error(`[baibao:channel] ${level} ${detail}`)
+    },
+    onRejected: (message) => {
+      console.error(`[baibao:channel] rejected unknown sender ${message.openid}`)
+    },
+    onMessage: async (message) => {
+      await sendChannelText('qq', message.openid, `收到：${message.content}`, {
+        msgId: message.messageId,
+      })
+    },
+  })
+
+  // Reconnect a channel that was left enabled, so a DSH restart does not
+  // silently take the phone client offline.
+  void readChannels()
+    .then((channels) => {
+      const qq = channels.qq
+      if (qq.enabled && qq.appId !== '' && qq.appSecret !== '') {
+        return startChannel('qq').catch((error) => {
+          console.error(
+            '[baibao:channel] autostart failed: ' +
+              (error instanceof Error ? error.message : String(error)),
+          )
+        })
+      }
+      return undefined
+    })
+    .catch(() => {})
 
   ctx.inject(['webServer'], (hostCtx) => {
     const onStorageChanged = () => {
