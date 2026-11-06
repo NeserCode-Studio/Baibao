@@ -20,7 +20,7 @@ export default {
   content: ['./src/client/**/*.{ts,tsx}'],
   important: '.bb-root',
   corePlugins: {
-    preflight: false,
+    preflight: true,
   },
   theme: {
     extend: {

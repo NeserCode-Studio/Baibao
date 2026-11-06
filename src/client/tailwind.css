@@ -4,17 +4,20 @@
  * The panel is embedded in the DSH shell, so the theme aliases point at the
  * shell's own design tokens rather than at fixed colours.
  *
- * Two things here are not obvious:
+ * **Preflight stays on.** Disabling it was a mistake: preflight does more than
+ * reset margins — it initialises the `--tw-*` custom properties that transform
+ * utilities read. Without it `translate-x-*` declared a value and computed to
+ * nothing, so the switch's thumb never moved.
  *
- * 1. `border-style: solid` is set explicitly. Tailwind's `border` utility only
- *    writes `border-width`; the style comes from preflight, which this project
- *    disables so it cannot restyle the host. Without this rule every border
- *    computes to 0 regardless of its declared width.
+ * It is safe here because `important: '.bb-root'` scopes preflight too: the
+ * generated reset reads `.bb-root *`, not `*`, and a scan of the output finds no
+ * rule escaping that scope. The host shell is untouched.
  *
- * 2. The shell's three surface tokens all resolve to the same colour, so there
- *    is no layer hierarchy to borrow. Tints are therefore mixed from the label
- *    colour against the base surface — that keeps them tied to the theme instead
- *    of hard-coding greys that break in dark mode.
+ * Colours are aliased onto the shell's tokens, but not all of them can be
+ * borrowed: the three `--dsw-alias-bg-layer-*` tokens all resolve to `#fff`, and
+ * the border token is 4% alpha. Any layer drawn from those has no visible edge,
+ * so tints are mixed from the label colour instead — still theme-driven, but
+ * with enough separation to see.
  */
 @tailwind components;
 @tailwind utilities;
@@ -41,18 +44,4 @@
   --bb-accent: color-mix(in srgb, var(--bb-foreground) 8%, var(--bb-background));
   --bb-accent-foreground: var(--bb-foreground);
   --bb-ring: var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary, #4f6ef7));
-}
-
-/**
- * Restore the border box model that preflight would normally provide.
- *
- * Scoped to `.bb-root` so nothing reaches the host shell.
- */
-.bb-root,
-.bb-root *,
-.bb-root *::before,
-.bb-root *::after {
-  border-style: solid;
-  border-color: var(--bb-border);
-  border-width: 0;
 }

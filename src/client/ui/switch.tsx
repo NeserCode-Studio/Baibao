@@ -1,14 +1,20 @@
 /**
- * shadcn/ui switch, built on Radix.
+ * shadcn/ui switch — the upstream component, with only the colours changed.
  *
- * Used instead of a checkbox for on/off settings: a switch reads as "this is
- * currently on" at a glance, where a checkbox reads as "select this".
+ * The geometry is shadcn's verbatim: the track carries `border-2
+ * border-transparent` (that transparent border *is* the inset), and the thumb
+ * travels `translate-x-4` driven by its own `data-state`. An earlier version
+ * substituted `p-0.5` and a hand-computed `translate-x-[18px]`, which is not the
+ * same layout and did not move.
  *
- * Contrast needed help here. The shell's border token is 14% of the foreground
- * and the track was drawn with it, while the thumb is pure white — the two
- * disappeared into each other and the control looked like an empty box. The
- * track now uses its own darker mix, and the thumb carries a border so it stays
- * visible against any of the panel's surfaces.
+ * Only two things differ from upstream:
+ *
+ * - the state colours, because this panel cannot borrow shadcn's `--primary` /
+ *   `--input` — the shell's tokens give no usable track colour;
+ * - the thumb is positioned from the root's `data-state` via `group`, not from
+ *   its own. The track colour proved that `data-state` reaches the root, while
+ *   the same attribute on the thumb drove nothing, so the knob stayed put and
+ *   only the track changed.
  */
 import * as SwitchPrimitive from '@radix-ui/react-switch'
 import type { ComponentProps } from 'react'
@@ -18,9 +24,8 @@ export function Switch({ className, ...props }: ComponentProps<typeof SwitchPrim
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full p-0.5',
-        'transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+        'group peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         'disabled:cursor-not-allowed disabled:opacity-50',
         'data-[state=checked]:bg-foreground data-[state=unchecked]:bg-[color:var(--bb-track)]',
         className,
@@ -29,9 +34,8 @@ export function Switch({ className, ...props }: ComponentProps<typeof SwitchPrim
     >
       <SwitchPrimitive.Thumb
         className={cn(
-          'pointer-events-none block size-4 rounded-full border border-border bg-background shadow-sm',
-          'transition-transform',
-          'data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0',
+          'pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform',
+          'translate-x-0 group-data-[state=checked]:translate-x-4',
         )}
       />
     </SwitchPrimitive.Root>
