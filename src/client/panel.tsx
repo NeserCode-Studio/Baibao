@@ -1260,6 +1260,45 @@ function PushSettingsCard({ t }: { t: TranslateBaibao }) {
  * empty and an empty submit means "keep what is stored". That is why the hint
  * under the field says whether a secret already exists.
  */
+/** TEMPORARY: report the colours the browser actually resolved. */
+function ColorProbe() {
+  const [report, setReport] = useState('')
+  useEffect(() => {
+    const root = document.querySelector('.bb-root')
+    if (root === null) {
+      setReport('.bb-root 未找到')
+      return
+    }
+    const cs = getComputedStyle(root)
+    const vars = [
+      '--dsw-alias-bg-base',
+      '--dsw-alias-bg-layer-1',
+      '--dsw-alias-bg-layer-2',
+      '--dsw-alias-border-l1',
+      '--dsw-alias-label-primary',
+      '--dsw-alias-brand-primary',
+      '--bb-background',
+      '--bb-surface',
+      '--bb-muted',
+      '--bb-border',
+      '--bb-primary',
+    ]
+    const lines = vars.map((name) => `${name} = ${cs.getPropertyValue(name).trim() || '(空)'}`)
+    const card = document.querySelector('[data-probe-card]')
+    if (card !== null) {
+      const cardStyle = getComputedStyle(card)
+      lines.push(`card background = ${cardStyle.backgroundColor}`)
+      lines.push(`card border = ${cardStyle.borderTopWidth} ${cardStyle.borderTopColor}`)
+    }
+    setReport(lines.join('\n'))
+  }, [])
+  return (
+    <pre className="whitespace-pre-wrap rounded-lg bg-black/80 p-2 font-mono text-[10px] leading-relaxed text-lime-300">
+      {report || '探测中…'}
+    </pre>
+  )
+}
+
 /** Small labelled field: the label sits above so long values never crowd it. */
 function Field({
   label,
@@ -1393,7 +1432,7 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           : 'channelStateIdle'
 
   return (
-    <div className="rounded-xl border border-border bg-muted p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+    <div data-probe-card className="rounded-xl border border-border bg-muted p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <h3 className="text-[13px] font-semibold leading-tight text-foreground">
@@ -1511,6 +1550,7 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
     >
       <SectionHead title={t('connectionsTitle')} body={t('connectionsBody')} />
       <QqChannel t={t} />
+      <ColorProbe />
       <WechatChannel t={t} />
       <IdentityCard t={t} />
       <PushSettingsCard t={t} />
