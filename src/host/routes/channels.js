@@ -32,6 +32,75 @@ import { readJson, sendJson } from '../util.js'
 export function registerChannelRoutes(ctx, hostCtx) {
   const webServer = hostCtx.webServer
 
+  // TEMPORARY diagnostic: what tools do the live agents actually hold?
+  // The host code is provably current (the build string below), while the tools
+  // answering "no other conversations" are not, so the gap is tool registration
+  // on already-created agents. This reports the truth instead of inferring it.
+  hostCtx.effect(
+    () =>
+      webServer.register({
+        kind: 'exact',
+        path: '/dsh-baibao/api/debug/agents',
+        handler: async (request, response) => {
+          const report = { build: BUILD, agents: [] }
+          try {
+            const agents = ctx.get('agents')
+            const list = typeof agents?.list === 'function' ? agents.list() : []
+            for (const agent of Array.isArray(list) ? list.slice(0, 20) : []) {
+              let detail = null
+              let error = null
+              try {
+                const tools = agent?.ctx?.tools
+                if (tools !== undefined && tools !== null) {
+                  let names = null
+                  let sample = null
+                  for (const method of ['definitions', 'schemas', 'view']) {
+                    if (typeof tools[method] !== 'function') continue
+                    try {
+                      const value = await tools[method]()
+                      const list = Array.isArray(value) ? value : []
+                      names = list
+                        .map((item) => item?.name ?? item?.function?.name ?? null)
+                        .filter((item) => typeof item === 'string')
+                      if (names.length > 0) {
+                        // Capture one baibao tool's description to reveal its build.
+                        const target = list.find(
+                          (item) => (item?.name ?? item?.function?.name) === 'session_list',
+                        )
+                        if (target !== undefined) {
+                          sample = JSON.stringify(target).slice(0, 400)
+                        }
+                        detail = { source: method, names, sample }
+                        break
+                      }
+                    } catch (caught) {
+                      detail = {
+                        source: method,
+                        failed: caught instanceof Error ? caught.message : String(caught),
+                      }
+                    }
+                  }
+                  if (detail === null) detail = { source: null, names }
+                }
+              } catch (caught) {
+                error = caught instanceof Error ? caught.message : String(caught)
+              }
+              report.agents.push({
+                id: String(agent?.id ?? ''),
+                phase: agent?.phase?.kind ?? null,
+                detail,
+                error,
+              })
+            }
+          } catch (caught) {
+            report.error = caught instanceof Error ? caught.message : String(caught)
+          }
+          sendJson(response, 200, report)
+        },
+      }),
+    'dsh-baibao: agent tool diagnostic',
+  )
+
   hostCtx.effect(
     () =>
       webServer.register({

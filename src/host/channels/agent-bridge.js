@@ -20,6 +20,10 @@ import path from 'node:path'
 import { defaultRoot } from '../paths.js'
 import { CHANNEL_LABELS, channelTitle, setChannelContext } from './context.js'
 import { counterpartOf } from './store.js'
+import { memoryTools } from '../memory.js'
+import { pushTools } from '../push.js'
+import { sessionTools } from './session-tools.js'
+import { listSessionLogs } from './session-files.js'
 
 /**
  * One live session per chat, so two people talking to the same bot do not read
@@ -69,10 +73,32 @@ export function isAssistantEvent(type) {
  * see this on WeChat" rather than guess. Added per turn because the creation
  * hook fires before the session has been mapped to a connector.
  */
-async function declareChannel(controller, sessionId, channel, userId) {
+async function declareChannel(ctx, controller, sessionId, channel, userId) {
   const resolved = await controller.resolveAgent(sessionId)
-  const prompt = resolved?.agent?.ctx?.systemPrompt
+  const agent = resolved?.agent
+  const prompt = agent?.ctx?.systemPrompt
   if (prompt === undefined || typeof prompt.section !== 'function') return
+
+  // Re-register the tools on every turn instead of trusting `agent/created`.
+  // Agents outlive a plugin reload: they keep the tool set they were created
+  // with, so a reload refreshed the host routes while the agent kept answering
+  // from an older build. Registering here makes the agent catch up on the next
+  // message rather than needing its own disposal.
+  try {
+    const tools = agent?.ctx?.tools
+    if (tools !== undefined && typeof tools.register === 'function') {
+      for (const tool of [...memoryTools(), ...pushTools(), ...sessionTools(ctx)]) {
+        try {
+          tools.register(tool)
+        } catch {
+          // Already registered by name; the existing definition wins.
+        }
+      }
+    }
+  } catch {
+    // Tool registration is best effort; the turn still runs without it.
+  }
+
   const label = CHANNEL_LABELS[channel] ?? channel
   const counterpart = await counterpartOf(channel, userId).catch(() => null)
   const lines = [
@@ -106,11 +132,48 @@ async function declareChannel(controller, sessionId, channel, userId) {
  * A disposed or archived session must not wedge the channel forever, so the
  * caller rebuilds on failure rather than caching blindly.
  */
+/**
+ * One-shot cleanup of channel conversations left from an older build.
+ *
+ * `tools.register` does not replace an existing tool, and `sessionController.create`
+ * hands back a reusable session whose agent already holds the tool set it was
+ * created with. Together those mean an agent created before a code change keeps
+ * answering from the old build forever — every message reuses it, and no reload
+ * touches it.
+ *
+ * Archiving the previous channel conversations forces the next turn onto a
+ * fresh session and therefore a fresh agent. History is not lost: the session
+ * logs stay on disk and `session_search` reads them directly.
+ */
+let recycled = false
+
+async function recycleStaleSessions(workspaces) {
+  if (recycled) return
+  recycled = true
+  if (typeof workspaces.archiveSession !== 'function') return
+  try {
+    const stale = listSessionLogs(60).filter(
+      (row) => row.title.startsWith('QQ ·') || row.title.startsWith('微信 ·'),
+    )
+    for (const row of stale) {
+      try {
+        await workspaces.archiveSession({ sessionId: row.id })
+      } catch {
+        // Already archived or unknown; either way it cannot be reused.
+      }
+    }
+  } catch {
+    // Listing is best effort; a failure just means the old session is reused once more.
+  }
+}
+
 async function ensureSession(ctx, key, channel, userId) {
   const controller = ctx.get('sessionController')
   const workspaces = ctx.get('workspaceController')
   if (controller === undefined || workspaces === undefined) throw new Error('dsh-services-missing')
 
+  await recycleStaleSessions(workspaces)
+  sessions.clear()
   const cached = sessions.get(key)
   if (cached !== undefined) {
     try {
@@ -197,7 +260,7 @@ export async function askAgent(ctx, text, options = {}) {
       // Tell the agent where it is talking. This is injected per turn rather
       // than once at creation, because the creation hook runs before the
       // session is mapped to a connector.
-      await declareChannel(controller, target, channel, userId).catch(() => {})
+      await declareChannel(ctx, controller, target, channel, userId).catch(() => {})
 
       const seenTypes = new Set()
       void (async () => {
