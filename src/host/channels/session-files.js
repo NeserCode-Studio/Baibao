@@ -277,15 +277,34 @@ export function normalizeCwd(value) {
 }
 
 /**
- * Sessions belonging to one workspace, newest first.
+ * Conversations the user has archived.
  *
- * Without `workspacePath` every session on disk is returned, which is what made
- * the list unwieldy: nine workspaces, 131 conversations. Scoping by `cwd` gives
- * the conversations the user actually means.
+ * Archiving removes a conversation from every grouping surface, so listing it
+ * back would contradict what the user sees in the sidebar — the list would show
+ * rows that are not there. Read-only: this file is DSH's, never written here.
+ */
+export function readArchivedIds() {
+  try {
+    const file = path.join(dshHome(), 'storages', 'workspace.json')
+    const data = JSON.parse(readFileSync(file, 'utf8'))
+    const ids = data?.global?.archivedSessionIds
+    return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [])
+  } catch {
+    // An unreadable registry means "no known archives", not "everything".
+    return new Set()
+  }
+}
+
+/**
+ * Sessions belonging to one workspace, newest first, excluding archived ones.
+ *
+ * Without `workspacePath` every live session on disk is returned, which is what
+ * made the list unwieldy: nine workspaces, 131 conversations.
  */
 export function listWorkspaceSessions(workspacePath, limit = MAX_SESSIONS) {
   const want = normalizeCwd(workspacePath)
-  const rows = listSessionLogs(Math.max(limit * 4, 120))
+  const archived = readArchivedIds()
+  const rows = listSessionLogs(Math.max(limit * 4, 160)).filter((row) => !archived.has(row.id))
   if (want === '') return rows.slice(0, limit)
   const matched = rows.filter((row) => normalizeCwd(readHeader(row.file)?.cwd) === want)
   return matched.slice(0, limit)
