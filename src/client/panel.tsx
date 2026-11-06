@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { BaibaoIcon } from './icon'
 import type { BaibaoKey } from './locales'
 import {
@@ -799,6 +799,15 @@ function WechatChannel({ t }: { t: TranslateBaibao }) {
     setUsers(next.allowedUsers.join(', '))
   }
 
+  const refresh = useCallback((): void => {
+    void getChannels().then((result) => {
+      if (!result.ok) return
+      const wx = result.channels.find((item) => item.id === 'wechat')
+      if (wx !== undefined) applyChannel(wx)
+      setStatus(result.status.wechat ?? { state: 'unknown' })
+    })
+  }, [])
+
   useEffect(() => {
     let live = true
     void getChannels().then((result) => {
@@ -817,6 +826,15 @@ function WechatChannel({ t }: { t: TranslateBaibao }) {
     }
   }, [])
 
+  // Keep following the connection while it is still settling. Without this the
+  // badge sticks on "connecting" until the tab remounts, because the login
+  // callback fires before the runner has actually connected.
+  useEffect(() => {
+    if (status.state !== 'connecting' && status.state !== 'reconnecting') return undefined
+    const timer = setInterval(refresh, 2000)
+    return () => clearInterval(timer)
+  }, [status.state, refresh])
+
   // Poll while a code is on screen.
   useEffect(() => {
     if (qr === null || qrState === 'done') return undefined
@@ -826,19 +844,16 @@ function WechatChannel({ t }: { t: TranslateBaibao }) {
         setQrState(result.state.status)
         if (result.state.done) {
           setQr(null)
-          void getChannels().then((next) => {
-            if (!next.ok) return
-            const wx = next.channels.find((item) => item.id === 'wechat')
-            if (wx !== undefined) applyChannel(wx)
-            setStatus(next.status.wechat ?? { state: 'unknown' })
-          })
+          // The scan succeeded but the runner is only starting up; `refresh`
+          // above carries the badge the rest of the way to "connected".
+          refresh()
         } else if (result.state.expired) {
           setQr(null)
         }
       })
     }, 2000)
     return () => clearInterval(timer)
-  }, [qr, qrState])
+  }, [qr, qrState, refresh])
 
   const startScan = (): void => {
     setPhase('busy')
@@ -1153,6 +1168,19 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
       live = false
     }
   }, [])
+
+  // Follow the connection while it settles, so saving does not leave the badge
+  // stuck on "connecting" until the tab is remounted.
+  useEffect(() => {
+    if (status.state !== 'connecting' && status.state !== 'reconnecting') return undefined
+    const timer = setInterval(() => {
+      void getChannels().then((result) => {
+        if (!result.ok) return
+        setStatus(result.status.qq ?? { state: 'unknown' })
+      })
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [status.state])
 
   const save = async (patch: Parameters<typeof saveChannel>[1]): Promise<void> => {
     setPhase('saving')
