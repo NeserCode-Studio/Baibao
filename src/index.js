@@ -50,21 +50,36 @@ let presetsReady = null
  * Returns null when no usable path exists.
  */
 async function resolvePtySafeExecutable(command) {
-  if (process.platform !== 'win32') return command
+  const report = await inspectPtyExecutable(command)
+  return report.path
+}
+
+/**
+ * Same resolution as `resolvePtySafeExecutable`, but keeps every step so a
+ * failure inside the host can be diagnosed instead of guessed at.
+ */
+async function inspectPtyExecutable(command) {
+  const steps = []
+  if (process.platform !== 'win32') {
+    return { path: command, steps: [{ step: 'non-windows', result: command }] }
+  }
   const { execFile } = await import('node:child_process')
   const { stat } = await import('node:fs/promises')
 
   const where = async (cmd) =>
     new Promise((resolve) => {
-      execFile('where', [cmd], (error, stdout) => {
-        resolve(
-          error
-            ? []
-            : stdout
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter((line) => line !== ''),
-        )
+      execFile('where', [cmd], (error, stdout, stderr) => {
+        const lines = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line !== '')
+        steps.push({
+          step: `where ${cmd}`,
+          error: error ? (error.code ?? error.message) : null,
+          stderr: stderr ? stderr.trim().slice(0, 200) : '',
+          lines,
+        })
+        resolve(lines)
       })
     })
 
@@ -77,23 +92,28 @@ async function resolvePtySafeExecutable(command) {
     }
   }
 
+  const resolved = await where(command)
+
   // A real image anywhere in the resolution order is usable as-is.
-  for (const candidate of await where(command)) {
-    if (await isRealImage(candidate)) return candidate
+  for (const candidate of resolved) {
+    if (await isRealImage(candidate)) {
+      steps.push({ step: 'picked', path: candidate, from: 'where' })
+      return { path: candidate, steps }
+    }
   }
 
   // Only aliases so far. A versioned alias such as
   // ...\WindowsApps\Microsoft.PowerShell-LTS_8wekyb3d8bbwe\pwsh.exe names the
-  // backing package family; the real image sits at
-  // ...\Program Files\WindowsApps\<that family>\<version>_x64__<hash>\pwsh.exe.
-  // Listing Program Files\WindowsApps fails with EPERM, so ask AppX instead of
-  // enumerating it.
+  // backing package family; the real image sits under Program Files\WindowsApps.
+  // Listing that folder fails with EPERM, so ask AppX instead of enumerating.
   const families = new Set()
-  for (const candidate of await where(command)) {
+  for (const candidate of resolved) {
     const parent = path.basename(path.dirname(candidate))
     const match = parent.match(/^([A-Za-z0-9._-]+)_8wekyb3d8bbwe$/)
     if (match !== null) families.add(match[1])
   }
+  steps.push({ step: 'families', families: [...families] })
+
   for (const family of families) {
     const locations = await new Promise((resolve) => {
       execFile(
@@ -103,24 +123,32 @@ async function resolvePtySafeExecutable(command) {
           '-Command',
           `Get-AppxPackage -Name '${family}' | Select-Object -ExpandProperty InstallLocation`,
         ],
-        (error, stdout) => {
-          resolve(
-            error
-              ? []
-              : stdout
-                  .split(/\r?\n/)
-                  .map((line) => line.trim())
-                  .filter((line) => line !== ''),
-          )
+        (error, stdout, stderr) => {
+          const lines = stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line !== '')
+          steps.push({
+            step: `appx ${family}`,
+            error: error ? (error.code ?? error.message) : null,
+            stderr: stderr ? stderr.trim().slice(0, 200) : '',
+            locations: lines,
+          })
+          resolve(lines)
         },
       )
     })
     for (const location of locations) {
       const candidate = path.join(location, `${command}.exe`)
-      if (await isRealImage(candidate)) return candidate
+      if (await isRealImage(candidate)) {
+        steps.push({ step: 'picked', path: candidate, from: 'appx' })
+        return { path: candidate, steps }
+      }
+      steps.push({ step: 'skipped', path: candidate, reason: 'not-a-real-image' })
     }
   }
-  return null
+  steps.push({ step: 'unresolved' })
+  return { path: null, steps }
 }
 
 /**
@@ -138,55 +166,136 @@ async function resolveShellDialect() {
   return executable === null ? 'bash' : 'pwsh'
 }
 
-function baibaoPlugins(shellDialect) {
+/**
+ * Plan-mode instructions, copied verbatim from the `ptc` preset document
+ * (`agentPresets.readDocument('ptc')`). Plan mode's behaviour lives entirely in
+ * this section, so paraphrasing it would silently change how the mode behaves.
+ */
+const PLAN_MODE_SECTION = `You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode or switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.`
+
+/**
+ * Plugins behind the Baibao agent mode.
+ *
+ * Mirrors the `ptc` preset (the fullest built-in composition) with two
+ * deliberate differences:
+ *
+ * - no `dsh-persona` row: Baibao supplies its own identity through the
+ *   `baibao-persona` / `baibao-persona-tuning` sections, and a second prefix
+ *   here would be a competing source of truth;
+ * - the terminal uses `dsh-tool-pwsh`, the row `standard` ships, because the
+ *   PTY stack (`dsh-terminal` + `dsh-terminal-bash`) cannot start a shell on
+ *   this machine: pwsh exists only as a 0-byte Store alias that conpty cannot
+ *   execute, and WSL's bash dies with `E_ACCESSDENIED` mounting its vhdx, so
+ *   both legal `shellDialect` values exit immediately.
+ *
+ * Everything else follows `ptc`'s config verbatim; those values are tuned by
+ * DSH itself and guessing replacements would only drift from it.
+ */
+function baibaoPlugins() {
   return [
+    {
+      id: 'agent-instructions',
+      name: '@deepseek-ai/dsh-agent-instructions',
+      config: { maxBytes: 65536 },
+    },
+    { id: 'time-context', name: '@deepseek-ai/dsh-time-context' },
+    { id: 'tool-pwsh', name: '@deepseek-ai/dsh-tool-pwsh' },
     {
       id: 'tool-fs',
       name: '@deepseek-ai/dsh-tool-fs',
-      config: { read: true, readImage: true, write: true, edit: true },
+      config: { read: true, readImage: true, write: true, edit: true, applyPatch: false },
+    },
+    {
+      id: 'tool-fs-search',
+      name: '@deepseek-ai/dsh-tool-fs-search',
+      config: { sampleOverCapGlobResults: false },
+    },
+    { id: 'tool-jobs', name: '@deepseek-ai/dsh-tool-jobs' },
+    { id: 'tool-schedule', name: '@deepseek-ai/dsh-tool-schedule' },
+    { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
+    { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+    { id: 'command-goal', name: '@deepseek-ai/dsh-command-goal' },
+    { id: 'tool-goal', name: '@deepseek-ai/dsh-tool-goal' },
+    {
+      id: 'planning',
+      name: 'cordis:group',
+      group: true,
+      isolate: { planMode: true },
+      config: [
+        {
+          id: 'plan-mode',
+          name: '@deepseek-ai/dsh-plan-mode',
+          config: { section: PLAN_MODE_SECTION },
+        },
+      ],
     },
     {
       id: 'compaction',
       name: 'cordis:group',
       group: true,
-      isolate: { compaction: true },
+      isolate: { compaction: true, toolResultPruner: true },
       config: [
         { id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic' },
         { id: 'command-compact', name: '@deepseek-ai/dsh-command-compact' },
+        {
+          id: 'tool-result-pruner',
+          name: '@deepseek-ai/dsh-compaction-tool-result-pruner',
+          config: { thresholdChars: 8192, headChars: 4096, tailChars: 1024 },
+        },
       ],
     },
     {
-      id: 'terminal',
+      id: 'delegation',
       name: 'cordis:group',
       group: true,
-      isolate: { terminals: true },
+      isolate: { workflowEngine: true },
       config: [
-        { id: 'pty', name: '@deepseek-ai/dsh-terminal' },
+        { id: 'tool-subagent-control', name: '@deepseek-ai/dsh-tool-subagent-control' },
         {
-          id: 'terminal-shell',
-          name: '@deepseek-ai/dsh-terminal-bash',
+          id: 'tool-subagent',
+          name: '@deepseek-ai/dsh-tool-subagent',
           config: {
-            shellDialect,
-            timeoutMs: 300000,
+            provider: 'spawn',
+            toolName: 'subagent',
+            modelSelection: true,
+            modelDiscovery: true,
           },
         },
-        // Keep the plugin id fixed. Swapping it for a per-dialect package was
-        // tried and broke preset registration: only `dsh-tool-pwsh-persistent`
-        // and `dsh-tool-bash-persistent` exist, so a `powershell` variant made
-        // the whole preset `broken` and Baibao silently fell back to standard.
-        process.platform === 'win32'
-          ? {
-              id: 'persistent-shell',
-              name: '@deepseek-ai/dsh-tool-pwsh-persistent',
-              config: { timeoutMs: 300000 },
-            }
-          : {
-              id: 'persistent-shell',
-              name: '@deepseek-ai/dsh-tool-bash-persistent',
-              config: { timeoutMs: 300000 },
-            },
+        {
+          id: 'tool-subagent-fork',
+          name: '@deepseek-ai/dsh-tool-subagent',
+          config: { provider: 'fork', toolName: 'subagent_fork' },
+        },
+        {
+          id: 'workflow-ptc',
+          name: '@deepseek-ai/dsh-workflow-ptc',
+          config: { provider: 'spawn' },
+        },
+        { id: 'tool-workflow', name: '@deepseek-ai/dsh-tool-workflow' },
       ],
     },
+    { id: 'tool-ask-user', name: '@deepseek-ai/dsh-tool-ask-user' },
+    {
+      id: 'tool-todo',
+      name: '@deepseek-ai/dsh-tool-todo',
+      config: { allowParallelInProgress: true },
+    },
+    {
+      id: 'tool-web',
+      name: '@deepseek-ai/dsh-tool-web',
+      config: { fetch: true, searchTimeoutMs: 60000 },
+    },
+    { id: 'present', name: '@deepseek-ai/dsh-tool-present' },
   ]
 }
 
@@ -215,16 +324,14 @@ async function ensureBaibaoPreset(presets) {
       }
       return true
     }
-    const dialect = await resolveShellDialect()
-    const plugins = baibaoPlugins(dialect)
     await presets.register({
       id: 'baibao',
       name: '百宝',
       description: '百宝的默认 Agent 模式：长期助手人格、文件与终端工具。',
       order: 20,
-      plugins,
+      plugins: baibaoPlugins(),
     })
-    lastPresetStatus = { attempted: true, ok: true, error: null, dialect }
+    lastPresetStatus = { attempted: true, ok: true, error: null }
     return true
   } catch (error) {
     lastPresetStatus = {
@@ -1644,6 +1751,79 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: persona route',
+    )
+
+    // TEMPORARY: diagnose why the terminal shell cannot start a PTY. Reports
+    // each resolution step and what `agentPresets` can do, so a config field
+    // that accepts an explicit shell path can be found rather than guessed.
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/spike/pty',
+          handler: async (request, response) => {
+            const report = { ok: true, platform: process.platform }
+            report.presetStatus = lastPresetStatus
+            const presets = ctx.get('agentPresets')
+            if (presets === undefined) {
+              report.agentPresets = 'missing'
+              sendJson(response, 200, report)
+              return
+            }
+            const safe = (value) => {
+              try {
+                return JSON.parse(
+                  JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? String(v) : v)),
+                )
+              } catch {
+                return String(value)
+              }
+            }
+            const url = new URL(request.url ?? '/', 'http://localhost')
+            const wanted = url.searchParams.get('id')
+            if (typeof presets.list === 'function') {
+              try {
+                const list = await presets.list()
+                report.presetList = list.map((item) => ({
+                  id: item.id,
+                  broken: item.broken ?? null,
+                }))
+              } catch (error) {
+                report.presetListError = error instanceof Error ? error.message : String(error)
+              }
+            }
+            // `definitions` holds the registered rows. Dumping one shows the
+            // real nesting and config, which cannot be inferred from the flat
+            // module list that `inspectCompositions` returns.
+            if (wanted !== null) {
+              for (const method of ['readDocument', 'resolve', 'composeFrom']) {
+                if (typeof presets[method] !== 'function') continue
+                try {
+                  report[`${method}:${wanted}`] = safe(await presets[method](wanted))
+                } catch (error) {
+                  report[`${method}Error`] =
+                    error instanceof Error ? error.message : String(error)
+                }
+              }
+            }
+            try {
+              const defs = presets.definitions
+              if (defs !== undefined) {
+                const ids = defs instanceof Map ? [...defs.keys()] : Object.keys(defs)
+                report.definitionIds = ids
+                if (wanted !== null) {
+                  report[`definitions:${wanted}`] = safe(
+                    defs instanceof Map ? defs.get(wanted) : defs[wanted],
+                  )
+                }
+              }
+            } catch (error) {
+              report.definitionsError = error instanceof Error ? error.message : String(error)
+            }
+            sendJson(response, 200, report)
+          },
+        }),
+      'dsh-baibao: pty diagnostic',
     )
 
     hostCtx.effect(
