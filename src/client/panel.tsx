@@ -12,6 +12,13 @@ import {
   type StorageMigration,
 } from './storage-api'
 import { deleteMemory, listMemory, MEMORY_PAGE_SIZE, type MemoryEntry } from './memory-api'
+import {
+  deleteNotification,
+  listNotifications,
+  updateNotification,
+  NOTIFICATION_PAGE_SIZE,
+  type NotificationEntry,
+} from './notifications-api'
 import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
 import {
   DEFAULT_JUNG,
@@ -775,7 +782,238 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
         <Card title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />
         <Card title={t('connectionsTriggerTitle')} body={t('connectionsTriggerBody')} badge={t('planned')} />
       </div>
+      <Inbox t={t} />
     </section>
+  )
+}
+
+/**
+ * Inbox: everything Baibao wanted to surface, including items the rule gate
+ * held back during quiet hours or past the daily budget.
+ */
+function Inbox({ t }: { t: TranslateBaibao }) {
+  const [entries, setEntries] = useState<NotificationEntry[]>([])
+  const [unread, setUnread] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageCount, setPageCount] = useState(1)
+  const [pageSize, setPageSize] = useState(NOTIFICATION_PAGE_SIZE)
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  const load = async (nextPage: number): Promise<void> => {
+    const result = await listNotifications('', nextPage)
+    if (result.ok) {
+      setEntries(result.entries)
+      setUnread(result.unread)
+      setTotal(result.total)
+      setPage(result.page)
+      setPageCount(result.pageCount)
+      setPageSize(result.pageSize)
+      setStatus('ready')
+    } else {
+      setStatus('error')
+    }
+  }
+
+  useEffect(() => {
+    let live = true
+    void listNotifications('', 1).then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setEntries(result.entries)
+        setUnread(result.unread)
+        setTotal(result.total)
+        setPage(result.page)
+        setPageCount(result.pageCount)
+        setPageSize(result.pageSize)
+        setStatus('ready')
+      } else {
+        setStatus('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const markRead = async (id: string): Promise<void> => {
+    const result = await updateNotification(id, { status: 'read' })
+    if (result.ok) {
+      setEntries((current) => current.map((item) => (item.id === id ? result.entry : item)))
+      setUnread(result.unread)
+    } else {
+      setStatus('error')
+    }
+  }
+
+  const dismiss = async (id: string): Promise<void> => {
+    const result = await updateNotification(id, { status: 'dismissed' })
+    if (result.ok) {
+      setEntries((current) => current.map((item) => (item.id === id ? result.entry : item)))
+      setUnread(result.unread)
+    } else {
+      setStatus('error')
+    }
+  }
+
+  const remove = async (id: string): Promise<void> => {
+    const result = await deleteNotification(id)
+    setPendingDelete(null)
+    if (!result.ok) {
+      setStatus('error')
+      return
+    }
+    setUnread(result.unread)
+    if (entries.length === 1 && page > 1) {
+      await load(page - 1)
+      return
+    }
+    await load(page)
+  }
+
+  const header = (
+    <div className="bb-inboxHead">
+      <span className="bb-jungBlockTitle">{t('inboxTitle')}</span>
+      {unread > 0 && <span className="bb-inboxUnread">{t('inboxUnread', { n: unread })}</span>}
+    </div>
+  )
+
+  if (status === 'loading') {
+    return (
+      <div className="bb-inbox">
+        {header}
+        <p className="bb-memoryEmpty">{t('inboxLoading')}</p>
+      </div>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <div className="bb-inbox">
+        {header}
+        <p className="bb-memoryError" role="alert">
+          {t('inboxFailed')}
+        </p>
+      </div>
+    )
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="bb-inbox">
+        {header}
+        <p className="bb-memoryEmpty">{t('inboxEmpty')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bb-inbox">
+      {header}
+      <ul className="bb-memoryList">
+        {entries.map((entry) => {
+          const priorityKey: BaibaoKey =
+            entry.priority === 'P0'
+              ? 'inboxPriorityP0'
+              : entry.priority === 'P1'
+                ? 'inboxPriorityP1'
+                : 'inboxPriorityP2'
+          return (
+            <li
+              key={entry.id}
+              className={
+                entry.status === 'unread' ? 'bb-memoryItem bb-inboxItemUnread' : 'bb-memoryItem'
+              }
+            >
+              <div className="bb-memoryTop">
+                <span className="bb-memoryKind">{t(priorityKey)}</span>
+                <span className="bb-memoryDate">
+                  {entry.createdAt === ''
+                    ? ''
+                    : new Date(entry.createdAt).toLocaleString()}
+                </span>
+              </div>
+              {entry.title !== '' && <p className="bb-inboxTitle">{entry.title}</p>}
+              {entry.body !== '' && <p className="bb-memoryText">{entry.body}</p>}
+              {entry.reason !== '' && (
+                <p className="bb-storageHint">{t('inboxReason', { reason: entry.reason })}</p>
+              )}
+              {entry.status !== 'unread' && (
+                <p className="bb-storageHint">
+                  {entry.status === 'dismissed' ? t('inboxDismissed') : t('inboxRead')}
+                </p>
+              )}
+              <div className="bb-memoryActions">
+                {entry.status === 'unread' && (
+                  <button
+                    type="button"
+                    className="bb-storageLink"
+                    onClick={() => void markRead(entry.id)}
+                  >
+                    {t('inboxMarkRead')}
+                  </button>
+                )}
+                {entry.status !== 'dismissed' && (
+                  <button
+                    type="button"
+                    className="bb-storageLink"
+                    onClick={() => void dismiss(entry.id)}
+                  >
+                    {t('inboxDismiss')}
+                  </button>
+                )}
+                {pendingDelete === entry.id ? (
+                  <>
+                    <button
+                      type="button"
+                      className="bb-storageDangerLink"
+                      onClick={() => void remove(entry.id)}
+                    >
+                      {t('memoryDeleteConfirm')}
+                    </button>
+                    <button
+                      type="button"
+                      className="bb-storageLink"
+                      onClick={() => setPendingDelete(null)}
+                    >
+                      {t('memoryCancel')}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="bb-storageLink"
+                    onClick={() => setPendingDelete(entry.id)}
+                  >
+                    {t('memoryDelete')}
+                  </button>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      {total > pageSize && (
+        <nav className="bb-pager" aria-label={t('inboxPager')}>
+          <button
+            type="button"
+            className="bb-secondaryBtn"
+            disabled={page <= 1}
+            onClick={() => void load(page - 1)}
+          >
+            {t('memoryPrev')}
+          </button>
+          <span className="bb-pagerStatus">{t('memoryPageOf', { page, count: pageCount })}</span>
+          <button
+            type="button"
+            className="bb-secondaryBtn"
+            disabled={page >= pageCount}
+            onClick={() => void load(page + 1)}
+          >
+            {t('memoryNext')}
+          </button>
+        </nav>
+      )}
+    </div>
   )
 }
 

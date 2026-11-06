@@ -297,13 +297,24 @@ function sendJson(response, status, payload) {
 async function createDefaults(root) {
   const memoryDir = path.join(root, 'memory')
   const configDir = path.join(root, 'config')
+  const pushDir = path.join(root, 'push')
   await mkdir(root, { recursive: true })
   await mkdir(memoryDir, { recursive: true })
   await mkdir(configDir, { recursive: true })
+  await mkdir(pushDir, { recursive: true })
 
   const memoryFile = path.join(memoryDir, 'memory.json')
   if (!(await pathExists(memoryFile))) {
     await writeFile(memoryFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + '\n', 'utf8')
+  }
+
+  const notificationsFile = path.join(pushDir, 'notifications.json')
+  if (!(await pathExists(notificationsFile))) {
+    await writeFile(
+      notificationsFile,
+      JSON.stringify({ version: 1, notifications: [] }, null, 2) + '\n',
+      'utf8',
+    )
   }
 
   const configFile = path.join(configDir, 'baibao.json')
@@ -354,6 +365,7 @@ async function migrateStorage(from, to) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   await copyTree(path.join(from, 'memory'), path.join(to, 'memory'), stamp, stats)
   await copyTree(path.join(from, 'config'), path.join(to, 'config'), stamp, stats)
+  await copyTree(path.join(from, 'push'), path.join(to, 'push'), stamp, stats)
   await createDefaults(to)
   await writeLocation(to)
 
@@ -362,6 +374,7 @@ async function migrateStorage(from, to) {
   try {
     await rm(path.join(from, 'memory'), { recursive: true, force: true })
     await rm(path.join(from, 'config'), { recursive: true, force: true })
+    await rm(path.join(from, 'push'), { recursive: true, force: true })
     oldDeleted = true
     try {
       await rmdir(from)
@@ -419,6 +432,7 @@ async function createBackup() {
   const stats = { files: 0, backups: 0 }
   await copyTree(path.join(location.root, 'memory'), path.join(target, 'memory'), id, stats)
   await copyTree(path.join(location.root, 'config'), path.join(target, 'config'), id, stats)
+  await copyTree(path.join(location.root, 'push'), path.join(target, 'push'), id, stats)
   const manifest = {
     version: 1,
     id,
@@ -844,7 +858,7 @@ const MEMORY_PAGE_SIZE_MAX = 100
  * back empty while `total` still reports the real count, so the caller can
  * correct itself instead of showing a blank list with no explanation.
  */
-function paginateMemories(entries, page, pageSize) {
+function paginate(entries, page, pageSize) {
   const size = Math.max(
     1,
     Math.min(
@@ -864,6 +878,210 @@ function paginateMemories(entries, page, pageSize) {
     pageSize: size,
     pageCount,
   }
+}
+
+// ---------------------------------------------------------------- notifications
+
+const NOTIFICATION_STATUSES = new Set(['unread', 'read', 'dismissed', 'acted'])
+const NOTIFICATION_PRIORITIES = new Set(['P0', 'P1', 'P2'])
+const NOTIFICATION_SOURCES = new Set(['schedule', 'event', 'webhook', 'manual'])
+
+/** Push settings default; overridable through `config.push`. */
+const PUSH_DEFAULTS = {
+  enabled: true,
+  quietHours: { start: '22:00', end: '08:00' },
+  dailyBudget: 3,
+  focusMode: false,
+}
+
+let pushQueue = Promise.resolve()
+
+function withPushLock(task) {
+  const next = pushQueue.then(task, task)
+  pushQueue = next.then(
+    () => {},
+    () => {},
+  )
+  return next
+}
+
+async function notificationsFile() {
+  const location = await readLocation()
+  return path.join(location.root, 'push', 'notifications.json')
+}
+
+async function readNotificationData() {
+  try {
+    const parsed = JSON.parse(await readFile(await notificationsFile(), 'utf8'))
+    if (parsed !== null && Array.isArray(parsed.notifications)) {
+      return { version: 1, notifications: parsed.notifications }
+    }
+  } catch {
+    // A missing or malformed file starts empty.
+  }
+  return { version: 1, notifications: [] }
+}
+
+async function writeNotificationData(data) {
+  const file = await notificationsFile()
+  await mkdir(path.dirname(file), { recursive: true })
+  const temp = `${file}.tmp`
+  await writeFile(temp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  await rename(temp, file)
+}
+
+function normalizeNotificationInput(input) {
+  const title = typeof input.title === 'string' ? input.title.trim() : ''
+  const body = typeof input.body === 'string' ? input.body.trim() : ''
+  if (title === '' && body === '') throw new Error('empty-notification')
+  return {
+    title: title.slice(0, 200),
+    body: body.slice(0, 2000),
+    priority: NOTIFICATION_PRIORITIES.has(input.priority) ? input.priority : 'P2',
+    source: NOTIFICATION_SOURCES.has(input.source) ? input.source : 'manual',
+    decision: typeof input.decision === 'string' ? input.decision.slice(0, 40) : 'inbox',
+    reason: typeof input.reason === 'string' ? input.reason.slice(0, 500) : '',
+    dedupeKey: typeof input.dedupeKey === 'string' ? input.dedupeKey.slice(0, 200) : null,
+  }
+}
+
+/** Newest-first, optionally filtered by status. */
+async function listNotifications(status = '') {
+  const data = await readNotificationData()
+  return data.notifications
+    .filter((item) => status === '' || item.status === status)
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+}
+
+async function saveNotification(input) {
+  return withPushLock(async () => {
+    const data = await readNotificationData()
+    const normalized = normalizeNotificationInput(input)
+    // Dedupe by key: the same event must not create a second row.
+    if (normalized.dedupeKey !== null) {
+      const existing = data.notifications.find(
+        (item) => item.dedupeKey === normalized.dedupeKey && item.status === 'unread',
+      )
+      if (existing !== undefined) return existing
+    }
+    const now = new Date().toISOString()
+    const entry = {
+      id: `ntf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ...normalized,
+      status: 'unread',
+      feedback: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    data.notifications.push(entry)
+    // Keep the file bounded; the inbox is a feed, not an archive.
+    if (data.notifications.length > 1000) {
+      data.notifications = data.notifications.slice(-1000)
+    }
+    await writeNotificationData(data)
+    return entry
+  })
+}
+
+async function updateNotification(id, patch) {
+  return withPushLock(async () => {
+    const data = await readNotificationData()
+    const entry = data.notifications.find((item) => item.id === id)
+    if (entry === undefined) return null
+    if (typeof patch.status === 'string' && NOTIFICATION_STATUSES.has(patch.status)) {
+      entry.status = patch.status
+    }
+    if (patch.feedback === 'useful' || patch.feedback === 'not-useful' || patch.feedback === null) {
+      entry.feedback = patch.feedback
+    }
+    entry.updatedAt = new Date().toISOString()
+    await writeNotificationData(data)
+    return entry
+  })
+}
+
+async function deleteNotification(id) {
+  return withPushLock(async () => {
+    const data = await readNotificationData()
+    const index = data.notifications.findIndex((item) => item.id === id)
+    if (index < 0) return false
+    data.notifications.splice(index, 1)
+    await writeNotificationData(data)
+    return true
+  })
+}
+
+async function unreadCount() {
+  const all = await listNotifications()
+  return all.filter((item) => item.status === 'unread').length
+}
+
+// ------------------------------------------------------------------ rule gate
+
+/** 'HH:mm' -> minutes since midnight, or null when malformed. */
+function parseClock(value) {
+  if (typeof value !== 'string') return null
+  const match = value.match(/^(\d{1,2}):(\d{2})$/)
+  if (match === null) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours > 23 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+
+/**
+ * True when `now` falls inside the quiet window.
+ *
+ * The window may cross midnight (22:00–08:00), so a start greater than the end
+ * means "wrap around" rather than "empty window".
+ */
+function inQuietHours(now, quietHours) {
+  const start = parseClock(quietHours?.start)
+  const end = parseClock(quietHours?.end)
+  if (start === null || end === null || start === end) return false
+  const minutes = now.getHours() * 60 + now.getMinutes()
+  return start < end ? minutes >= start && minutes < end : minutes >= start || minutes < end
+}
+
+/**
+ * Deterministic pre-filter: decides whether an event may reach the user, and
+ * through which sink.
+ *
+ * Only P0 pierces quiet hours and the daily budget; everything else waits or
+ * degrades to the inbox. The default answer is "inbox", never "notify", so a
+ * bug here under-notifies rather than spams.
+ *
+ * `now` and `notifiedToday` are injected so the rules are testable without a
+ * clock or a real store.
+ */
+function ruleGate(event, settings, notifiedToday, now) {
+  const config = { ...PUSH_DEFAULTS, ...(settings ?? {}) }
+  const priority = NOTIFICATION_PRIORITIES.has(event?.priority) ? event.priority : 'P2'
+
+  if (config.enabled !== true) {
+    return { sink: null, reason: 'push-disabled' }
+  }
+  if (!NOTIFICATION_SOURCES.has(event?.source)) {
+    return { sink: null, reason: 'unknown-source' }
+  }
+  // P0 is reserved for safety, failure and deadlines: it must not be muted.
+  if (priority !== 'P0') {
+    if (config.focusMode === true) {
+      return { sink: 'inbox', reason: 'focus-mode' }
+    }
+    if (inQuietHours(now, config.quietHours)) {
+      return { sink: 'inbox', reason: 'quiet-hours' }
+    }
+    const budget = Number.isFinite(config.dailyBudget) ? config.dailyBudget : 0
+    if (notifiedToday >= budget) {
+      return { sink: 'inbox', reason: 'daily-budget' }
+    }
+  }
+  // Informational items never interrupt.
+  if (priority === 'P2') {
+    return { sink: 'inbox', reason: 'informational' }
+  }
+  return { sink: 'notify', reason: 'noteworthy' }
 }
 
 function memoryTools() {
@@ -1524,7 +1742,7 @@ export function apply(ctx) {
               if (request.method === 'GET') {
                 const url = new URL(request.url ?? '/', 'http://localhost')
                 const matched = await listMemory(url.searchParams.get('q') ?? '')
-                const page = paginateMemories(
+                const page = paginate(
                   matched,
                   Number(url.searchParams.get('page')),
                   Number(url.searchParams.get('pageSize')),
@@ -1562,6 +1780,80 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: memory route',
+    )
+
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/notifications',
+          handler: async (request, response) => {
+            try {
+              if (request.method === 'GET') {
+                const url = new URL(request.url ?? '/', 'http://localhost')
+                const status = url.searchParams.get('status') ?? ''
+                const items = await listNotifications(status)
+                const page = paginate(
+                  items,
+                  Number(url.searchParams.get('page')),
+                  Number(url.searchParams.get('pageSize')),
+                )
+                sendJson(response, 200, { ok: true, ...page, unread: await unreadCount() })
+                return
+              }
+
+              if (request.method === 'POST') {
+                const body = await readJson(request)
+                const entry = await saveNotification(body)
+                sendJson(response, 200, { ok: true, entry, unread: await unreadCount() })
+                return
+              }
+
+              if (request.method === 'PATCH') {
+                const body = await readJson(request)
+                const id = typeof body?.id === 'string' ? body.id : ''
+                if (id === '') {
+                  sendJson(response, 400, { ok: false, error: 'missing-notification-id' })
+                  return
+                }
+                const entry = await updateNotification(id, {
+                  status: body.status,
+                  feedback: body.feedback,
+                })
+                if (entry === null) {
+                  sendJson(response, 404, { ok: false, error: 'not-found' })
+                  return
+                }
+                sendJson(response, 200, { ok: true, entry, unread: await unreadCount() })
+                return
+              }
+
+              if (request.method === 'DELETE') {
+                const url = new URL(request.url ?? '/', 'http://localhost')
+                const id = url.searchParams.get('id')
+                if (id === null || id === '') {
+                  sendJson(response, 400, { ok: false, error: 'missing-notification-id' })
+                  return
+                }
+                sendJson(response, 200, {
+                  ok: true,
+                  deleted: await deleteNotification(id),
+                  unread: await unreadCount(),
+                })
+                return
+              }
+
+              response.writeHead(405, { allow: 'GET, POST, PATCH, DELETE' })
+              response.end()
+            } catch (error) {
+              sendJson(response, 500, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        }),
+      'dsh-baibao: notifications route',
     )
 
     hostCtx.effect(
@@ -1615,6 +1907,44 @@ export function apply(ctx) {
           },
         }),
       'dsh-baibao: persona route',
+    )
+
+    // TEMPORARY (S7): shape probe for the `schedule` service. Read-only unless
+    // `POST ?mode=create`, which is used once to check delivery timing.
+    hostCtx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/dsh-baibao/api/spike/schedule',
+          handler: async (request, response) => {
+            const report = { ok: true }
+            const schedule = ctx.get('schedule')
+            if (schedule === undefined) {
+              sendJson(response, 200, { ok: false, error: 'schedule-not-injected' })
+              return
+            }
+            const proto = Object.getPrototypeOf(schedule)
+            report.own = Object.keys(schedule)
+            report.proto = proto === null ? [] : Object.getOwnPropertyNames(proto)
+            report.types = {}
+            for (const key of [...report.own, ...report.proto]) {
+              const value = schedule[key]
+              report.types[key] = typeof value
+              if (typeof value === 'function') {
+                report.types[`${key}.length`] = value.length
+              }
+            }
+            if (typeof schedule.list === 'function') {
+              try {
+                report.current = JSON.parse(JSON.stringify(await schedule.list()))
+              } catch (error) {
+                report.listError = error instanceof Error ? error.message : String(error)
+              }
+            }
+            sendJson(response, 200, report)
+          },
+        }),
+      'dsh-baibao: s7 schedule probe',
     )
 
     hostCtx.effect(

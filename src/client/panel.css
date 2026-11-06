@@ -578,6 +578,40 @@
   }
 }
 
+.bb-inbox {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.bb-inboxHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bb-inboxUnread {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-brand-primary, #4f6ef7);
+  border-radius: 999px;
+}
+
+.bb-inboxItemUnread {
+  border-color: var(--dsw-alias-brand-primary, #4f6ef7);
+}
+
+.bb-inboxTitle {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+
 .bb-memoryPanel {
   display: flex;
   flex-direction: column;
