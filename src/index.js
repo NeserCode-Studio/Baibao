@@ -29,7 +29,6 @@ const PERSONA_TEXT_LIMIT = 600
 
 let baibaoWorkspacePath = null
 let presetsReady = null
-let presetsResolve = null
 
 // The persona text is injected per agent from `config.persona.text` in the
 // `agent/created` handler, so the preset must not carry its own hardcoded
@@ -137,20 +136,49 @@ function baibaoPlugins(shellDialect) {
   ]
 }
 
+/**
+ * Last preset-registration outcome, surfaced through the diagnostic route so a
+ * silent failure cannot masquerade as "no Baibao mode".
+ */
+let lastPresetStatus = { attempted: false, ok: false, error: null, dialect: null }
+
 async function ensureBaibaoPreset(presets) {
-  if (presets === undefined) return false
+  if (presets === undefined) {
+    lastPresetStatus = { attempted: false, ok: false, error: 'service-missing', dialect: null }
+    return false
+  }
   try {
     const list = await presets.list()
-    if (list.some((preset) => preset.id === 'baibao')) return true
+    if (list.some((preset) => preset.id === 'baibao')) {
+      const existing = list.find((preset) => preset.id === 'baibao')
+      lastPresetStatus = {
+        attempted: false,
+        ok: true,
+        error: null,
+        dialect: null,
+        alreadyPresent: true,
+        broken: existing?.broken ?? null,
+      }
+      return true
+    }
+    const dialect = await resolveShellDialect()
+    const plugins = baibaoPlugins(dialect)
     await presets.register({
       id: 'baibao',
       name: '百宝',
       description: '百宝的默认 Agent 模式：长期助手人格、文件与终端工具。',
       order: 20,
-      plugins: baibaoPlugins(await resolveShellDialect()),
+      plugins,
     })
+    lastPresetStatus = { attempted: true, ok: true, error: null, dialect }
     return true
-  } catch {
+  } catch (error) {
+    lastPresetStatus = {
+      attempted: true,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      dialect: null,
+    }
     return false
   }
 }
@@ -1188,22 +1216,25 @@ function renderMemoryContext(entries) {
 }
 
 export function apply(ctx) {
+  // Resolves once preset registration has settled, or false on timeout. The
+  // timer must not resolve before a late-but-successful registration, otherwise
+  // `chat/start` keeps omitting the preset for the rest of the session.
+  let settlePresets = null
   presetsReady = new Promise((resolve) => {
-    presetsResolve = resolve
+    settlePresets = resolve
   })
-  const presetTimer = setTimeout(() => {
-    presetsResolve?.(false)
-  }, 3000)
+  let settled = false
+  const settle = (value) => {
+    if (settled) return
+    settled = true
+    clearTimeout(presetTimer)
+    settlePresets?.(value)
+  }
+  const presetTimer = setTimeout(() => settle(false), 3000)
   ctx.inject(['agentPresets'], (presetCtx) => {
     void ensureBaibaoPreset(presetCtx.agentPresets)
-      .then((ready) => {
-        clearTimeout(presetTimer)
-        presetsResolve?.(ready)
-      })
-      .catch(() => {
-        clearTimeout(presetTimer)
-        presetsResolve?.(false)
-      })
+      .then((ready) => settle(ready))
+      .catch(() => settle(false))
   })
   void readLocation()
     .then(() => {
@@ -1535,6 +1566,22 @@ export function apply(ctx) {
           path: '/dsh-baibao/api/spike/pty',
           handler: async (_request, response) => {
             const report = { ok: true, platform: process.platform }
+            // Preset registration state, so "no Baibao mode" is diagnosable.
+            report.preset = lastPresetStatus
+            const presets = ctx.get('agentPresets')
+            if (presets !== undefined && typeof presets.list === 'function') {
+              try {
+                const list = await presets.list()
+                report.presetList = list.map((item) => ({
+                  id: item.id,
+                  broken: item.broken ?? null,
+                }))
+              } catch (error) {
+                report.presetListError = error instanceof Error ? error.message : String(error)
+              }
+            } else {
+              report.presetListError = 'agentPresets unavailable'
+            }
             const which = async (cmd) => {
               const { execFile } = await import('node:child_process')
               return new Promise((resolve) => {
