@@ -26,8 +26,11 @@ const buttonVariants = cva(
         destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
       },
       size: {
-        default: 'h-7 px-3 text-body',
-        sm: 'h-6 px-2 text-label',
+        // Standard font sizes only: 	ailwind-merge groups any 	ext-* token as
+        // the same property unless it recognises the value, and a custom size
+        // name made it treat the size as a colour and override the variant.
+        default: 'h-7 px-3 text-xs',
+        sm: 'h-6 px-2 text-[11px]',
         icon: 'size-7',
       },
     },

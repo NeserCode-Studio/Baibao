@@ -1469,7 +1469,7 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
 
       <div className="mt-4 flex items-center gap-2">
         <Button
-          className="h-8 px-3.5 text-[12px]"
+          className="h-8 px-3.5"
           onClick={submit}
           disabled={phase === 'loading' || phase === 'saving'}
         >
@@ -1478,7 +1478,7 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
         {channel?.hasSecret === true && (
           <Button
             variant="ghost"
-            className="h-8 px-3 text-[12px]"
+            className="h-8 px-3"
             onClick={() => void save({ clearSecret: true })}
             disabled={phase === 'loading' || phase === 'saving'}
           >

@@ -50,10 +50,6 @@ export default {
         card: '10px',
         input: '8px',
       },
-      fontSize: {
-        label: ['11px', { lineHeight: '1.4' }],
-        body: ['12px', { lineHeight: '1.5' }],
-      },
       ringColor: {
         DEFAULT: 'var(--bb-ring)',
       },
