@@ -18,9 +18,12 @@ import {
   describeSessionStore,
   findSessionLog,
   listSessionLogs,
+  listWorkspaceSessions,
   readSessionMessages,
   searchSessionLogs,
 } from './session-files.js'
+import { defaultRoot } from '../paths.js'
+import path from 'node:path'
 import { BUILD } from '../build.js'
 
 /** How many recent conversations a search covers. */
@@ -68,7 +71,7 @@ function toText(value) {
 }
 
 /** Kept small on purpose: a long payload is what made render come back empty. */
-const RENDER_LIMIT = 800
+const RENDER_LIMIT = 6000
 
 /**
  * Render the tool's *result*, not its arguments.
@@ -102,7 +105,7 @@ export function sessionTools(_ctx) {
       output: stringOutput('没有其他会话。'),
       execute: async () => {
         try {
-          const rows = listSessionLogs(LIST_DEPTH)
+          const rows = listWorkspaceSessions(path.join(defaultRoot(), 'workspace'), LIST_DEPTH)
           if (rows.length === 0) return `没有其他会话。诊断（${TOOL_BUILD}）：${describeSessionStore()}`
           return rows.map(formatRow).join('\n')
         } catch (error) {

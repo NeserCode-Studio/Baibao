@@ -228,9 +228,67 @@ export function searchSessionLogs(needle, limit = MAX_SESSIONS) {
   return hits
 }
 
+/**
+ * Read only the first frame, which holds the session header.
+ *
+ * The header carries `cwd`, and that is how a conversation is assigned to a
+ * workspace — the directory name is a lossy encoding of the same path and cannot
+ * be compared reliably. Decompressing one frame is cheap; the full log is not.
+ */
+export function readHeader(file) {
+  if (zstdDecompress === null) return null
+  let buffer
+  try {
+    buffer = readFileSync(file)
+  } catch {
+    return null
+  }
+  // Cut at the second frame so a single frame is decompressed.
+  let end = buffer.length
+  for (let index = 4; index < buffer.length - 3; index += 1) {
+    if (
+      buffer[index] === ZSTD_MAGIC[0] &&
+      buffer[index + 1] === ZSTD_MAGIC[1] &&
+      buffer[index + 2] === ZSTD_MAGIC[2] &&
+      buffer[index + 3] === ZSTD_MAGIC[3]
+    ) {
+      end = index
+      break
+    }
+  }
+  try {
+    const text = zstdDecompress(buffer.subarray(0, end)).toString('utf8')
+    const first = text.split('\n').find((line) => line !== '')
+    return first === undefined ? null : JSON.parse(first)
+  } catch {
+    return null
+  }
+}
+
 /** Find one session log by id, regardless of position. */
 export function findSessionLog(sessionId) {
   return listSessionLogs(200).find((row) => row.id === sessionId) ?? null
+}
+
+/** Normalized form for comparing workspace paths across separators and case. */
+export function normalizeCwd(value) {
+  if (typeof value !== 'string' || value === '') return ''
+  return value.replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+/**
+ * Sessions belonging to one workspace, newest first.
+ *
+ * Without `workspacePath` every session on disk is returned, which is what made
+ * the list unwieldy: nine workspaces, 131 conversations. Scoping by `cwd` gives
+ * the conversations the user actually means.
+ */
+export function listWorkspaceSessions(workspacePath, limit = MAX_SESSIONS) {
+  const want = normalizeCwd(workspacePath)
+  const rows = listSessionLogs(Math.max(limit * 4, 120))
+  if (want === '') return rows.slice(0, limit)
+  const matched = rows.filter((row) => normalizeCwd(readHeader(row.file)?.cwd) === want)
+  return matched.slice(0, limit)
 }
 
 /**
