@@ -182,22 +182,28 @@ export async function sendC2CMessage(token, openid, content, options = {}) {
 /**
  * Normalise a `C2C_MESSAGE_CREATE` payload into the fields Baibao needs.
  *
- * Returns null for anything that is not a usable text message from a user:
- * the bot's own echoes, empty content, and non-text attachments all fall
- * through, since the agent cannot act on them meaningfully.
+ * Returns null only when the payload cannot be acted on at all (no sender, or
+ * the bot's own echo). A message with empty text is still returned, with
+ * `hasText: false`: stickers and pure-attachment messages arrive that way, and
+ * silently dropping them means the caller never learns the message existed —
+ * no allow-list entry, no "I can't read that yet" reply, and no trace for
+ * debugging.
  */
 export function parseC2CMessage(payload) {
   const data = payload?.d
   if (data === null || typeof data !== 'object') return null
   const author = data.author ?? {}
   if (author.bot === true) return null
-  const content = typeof data.content === 'string' ? data.content.trim() : ''
-  if (content === '') return null
   const openid = typeof author.user_openid === 'string' ? author.user_openid : ''
   if (openid === '') return null
+  const content = typeof data.content === 'string' ? data.content.trim() : ''
   return {
     openid,
     content,
+    hasText: content !== '',
+    attachments: Array.isArray(data.attachments) ? data.attachments.length : 0,
+    // `message_scene.ext` carries platform extras (for example a sticker id).
+    sceneExt: Array.isArray(data.message_scene?.ext) ? data.message_scene.ext.length : 0,
     messageId: typeof data.id === 'string' ? data.id : '',
     timestamp: typeof data.timestamp === 'string' ? data.timestamp : '',
   }

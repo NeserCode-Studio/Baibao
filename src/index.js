@@ -94,6 +94,14 @@ export function apply(ctx) {
       console.error(`[baibao:channel] rejected unknown sender ${message.openid}`)
     },
     onMessage: async (message) => {
+      // Stickers and image-only messages arrive with no text. Say so instead of
+      // staying silent, otherwise the sender cannot tell whether it worked.
+      if (!message.hasText) {
+        await sendChannelText('qq', message.openid, '目前只能处理文字消息，表情和图片还看不了。', {
+          msgId: message.messageId,
+        })
+        return
+      }
       await sendChannelText('qq', message.openid, `收到：${message.content}`, {
         msgId: message.messageId,
       })
