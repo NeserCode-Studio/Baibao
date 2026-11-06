@@ -21,12 +21,17 @@
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import { build } from 'esbuild'
+import postcss from 'postcss'
+import tailwindcss from 'tailwindcss'
+import autoprefixer from 'autoprefixer'
 
 const PACKAGE_NAME = 'dsh-baibao'
 const CLIENT_ENTRY = 'src/client/index.tsx'
 const HOST_ENTRY = 'src/index.js'
 const CLIENT_OUT = 'lib/client.js'
 const HOST_OUT = 'lib/index.js'
+const TAILWIND_ENTRY = 'src/client/tailwind.css'
+const TAILWIND_OUT = 'src/client/tailwind.generated.css'
 const WATCH = process.argv.includes('--watch')
 
 const EXTERNALS = [
@@ -51,6 +56,23 @@ async function writeIfChanged(path, content) {
   }
   await writeFile(path, content, 'utf8')
   return true
+}
+
+/**
+ * Generate the Tailwind stylesheet the client imports as text.
+ *
+ * It is written into `src/client/` so the client's relative `import` resolves,
+ * and the watcher ignores that one filename — otherwise generating it would
+ * trigger another build, forever.
+ * @returns {Promise<boolean>} whether the file was rewritten.
+ */
+async function buildTailwind() {
+  const source = await readFile(TAILWIND_ENTRY, 'utf8')
+  const result = await postcss([tailwindcss({ config: './tailwind.config.js' }), autoprefixer]).process(
+    source,
+    { from: TAILWIND_ENTRY },
+  )
+  return writeIfChanged(TAILWIND_OUT, result.css)
 }
 
 /**
@@ -87,6 +109,7 @@ async function buildHost() {
  * @returns {Promise<boolean>} whether any output changed.
  */
 async function buildOnce() {
+  await buildTailwind()
   const result = await build({
     entryPoints: [CLIENT_ENTRY],
     bundle: true,
@@ -172,7 +195,12 @@ if (WATCH) {
     timer = setTimeout(() => void run(), 80)
   }
 
-  const watcher = watch('src', { recursive: true }, schedule)
+  const watcher = watch('src', { recursive: true }, (event, filename) => {
+    // The generated Tailwind file lives under src/ so the import resolves;
+    // rebuilding on its own output would loop forever.
+    if (typeof filename === 'string' && filename.endsWith('.generated.css')) return
+    schedule()
+  })
   console.log('[baibao] watching src/ (Ctrl+C to stop)')
   process.on('SIGINT', () => {
     watcher.close()

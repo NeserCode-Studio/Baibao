@@ -21,6 +21,9 @@ import {
 } from './notifications-api'
 import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
 import { getPush, savePush, type PushState } from './push-api'
+import { Button } from './ui/button'
+import { cn } from './ui/cn'
+import { Input } from './ui/input'
 import {
   getChannels,
   pollWechatQr,
@@ -1339,26 +1342,29 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           : 'channelStateIdle'
 
   return (
-    <div className="bb-channel">
-      <div className="bb-jungRowTop">
-        <span className="bb-jungBlockTitle">{t('channelQqTitle')}</span>
+    <div className="space-y-2 rounded-card border border-border bg-surface p-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-body font-semibold text-foreground">{t('channelQqTitle')}</span>
         <span
-          className={status.state === 'ready' ? 'bb-channelStateOk' : 'bb-channelState'}
           role="status"
+          className={cn(
+            'rounded-full px-2 py-0.5 text-label font-semibold',
+            status.state === 'ready'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted text-muted-foreground',
+          )}
         >
           {t(stateKey)}
         </span>
       </div>
-      <p className="bb-storageHint">{t('channelQqBody')}</p>
+      <p className="text-label text-muted-foreground">{t('channelQqBody')}</p>
 
-      <div className="bb-channelRow">
-        <label className="bb-consolidationLabel" htmlFor="bb-qq-appid">
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+        <label className="text-label text-muted-foreground" htmlFor="bb-qq-appid">
           {t('channelAppId')}
         </label>
-        <input
+        <Input
           id="bb-qq-appid"
-          type="text"
-          className="bb-memorySearchInput"
           value={appId}
           spellCheck={false}
           autoComplete="off"
@@ -1367,16 +1373,13 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
             setPhase('ready')
           }}
         />
-      </div>
 
-      <div className="bb-channelRow">
-        <label className="bb-consolidationLabel" htmlFor="bb-qq-secret">
+        <label className="text-label text-muted-foreground" htmlFor="bb-qq-secret">
           {t('channelAppSecret')}
         </label>
-        <input
+        <Input
           id="bb-qq-secret"
           type="password"
-          className="bb-memorySearchInput"
           value={appSecret}
           spellCheck={false}
           autoComplete="new-password"
@@ -1386,16 +1389,12 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
             setPhase('ready')
           }}
         />
-      </div>
 
-      <div className="bb-channelRow">
-        <label className="bb-consolidationLabel" htmlFor="bb-qq-users">
+        <label className="text-label text-muted-foreground" htmlFor="bb-qq-users">
           {t('channelAllowedUsers')}
         </label>
-        <input
+        <Input
           id="bb-qq-users"
-          type="text"
-          className="bb-memorySearchInput"
           value={users}
           spellCheck={false}
           placeholder={t('channelAllowedUsersHint')}
@@ -1406,11 +1405,12 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
         />
       </div>
 
-      <p className="bb-storageHint">{t('channelAllowedUsersBody')}</p>
+      <p className="text-label text-muted-foreground">{t('channelAllowedUsersBody')}</p>
 
-      <label className="bb-channelToggle">
+      <label className="flex cursor-pointer items-center gap-2 text-body text-foreground">
         <input
           type="checkbox"
+          className="size-3.5 accent-[var(--bb-primary)]"
           checked={enabled}
           onChange={(event) => {
             setEnabled(event.target.checked)
@@ -1420,34 +1420,28 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
         <span>{t('channelEnable')}</span>
       </label>
 
-      <div className="bb-personaActions">
-        <button
-          type="button"
-          className="bb-personaBtn"
-          onClick={submit}
-          disabled={phase === 'loading' || phase === 'saving'}
-        >
+      <div className="flex gap-2">
+        <Button onClick={submit} disabled={phase === 'loading' || phase === 'saving'}>
           {t('consolidationSave')}
-        </button>
+        </Button>
         {channel?.hasSecret === true && (
-          <button
-            type="button"
-            className="bb-secondaryBtn"
+          <Button
+            variant="outline"
             onClick={() => void save({ clearSecret: true })}
             disabled={phase === 'loading' || phase === 'saving'}
           >
             {t('channelClearSecret')}
-          </button>
+          </Button>
         )}
       </div>
 
       {phase === 'saved' && (
-        <p className="bb-storageOk" role="status">
+        <p className="text-label text-primary" role="status">
           {t('consolidationSaved')}
         </p>
       )}
       {phase === 'error' && (
-        <p className="bb-storageError" role="alert">
+        <p className="text-label text-destructive" role="alert">
           {t('channelFailed')}
         </p>
       )}

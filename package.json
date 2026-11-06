@@ -58,12 +58,19 @@
     "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.5",
     "@types/react": "~18.3.3",
     "@types/react-dom": "~18.3.1",
+    "autoprefixer": "^10.6.2",
     "esbuild": "^0.25.0",
+    "postcss": "^8.5.32",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.19",
     "typescript": "~5.6.3"
   },
   "dependencies": {
-    "qrcode": "^1.5.4"
+    "@radix-ui/react-slot": "^1.5.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "qrcode": "^1.5.4",
+    "tailwind-merge": "^3.7.0"
   }
 }

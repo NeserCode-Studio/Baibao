@@ -23,6 +23,7 @@ import { BaibaoIcon } from './icon'
 import { startBaibaoChat } from './chat-api'
 import { en, zh } from './locales'
 import panelCss from './panel.css'
+import tailwindCss from './tailwind.generated.css'
 import { BaibaoPanel, type TranslateBaibao } from './panel'
 
 export const name = 'dsh-baibao'
@@ -129,15 +130,29 @@ export function apply(ctx: Context): void {
 }
 
 /**
- * Own the panel's stylesheet as one plugin-owned `<style>` tag.
- * @returns disposer removing the tag.
+ * Own the panel's stylesheets as plugin-owned `<style>` tags.
+ *
+ * Tailwind loads first so the hand-written sheet can still override it, and both
+ * are scoped by construction: the reset is disabled and every utility rule is
+ * prefixed and anchored to `.bb-root`.
+ * @returns disposer removing the tags.
  */
 function installStyles(): () => void {
   if (typeof document === 'undefined') return () => {}
-  const tag = document.createElement('style')
-  tag.dataset['plugin'] = NS
-  tag.dataset['pluginCss'] = `${NS}/panel.css`
-  tag.textContent = panelCss
-  document.head.appendChild(tag)
-  return () => tag.remove()
+  const tags: HTMLStyleElement[] = []
+  const sheets: [string, string][] = [
+    ['tailwind.generated.css', tailwindCss],
+    ['panel.css', panelCss],
+  ]
+  for (const [name, css] of sheets) {
+    const tag = document.createElement('style')
+    tag.dataset['plugin'] = NS
+    tag.dataset['pluginCss'] = `${NS}/${name}`
+    tag.textContent = css
+    document.head.appendChild(tag)
+    tags.push(tag)
+  }
+  return () => {
+    for (const tag of tags) tag.remove()
+  }
 }
