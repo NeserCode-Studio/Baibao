@@ -185,7 +185,7 @@ export function memoryTools() {
           required: ['id', 'text'],
           additionalProperties: false,
         },
-        render: (value) => [{ type: 'text', text: `记得了：${value.text}` }],
+        render: (value) => [{ type: 'text', text: `记得了：${value?.text ?? ""}` }],
       },
       execute: async (input) => {
         // The agent only calls this when the user asked to remember something,
@@ -253,7 +253,7 @@ export function memoryTools() {
         render: (value) => [
           {
             type: 'text',
-            text: value.deleted ? `已删除：${value.text ?? ''}` : '没有找到该记忆。',
+            text: value?.deleted === true ? `已删除：${value.text ?? ''}` : '没有找到该记忆。',
           },
         ],
       },

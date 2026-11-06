@@ -325,11 +325,12 @@ export function pushTools() {
         render: (value) => [
           {
             type: 'text',
-            text: value.delivered
-              ? value.sink === 'notify'
-                ? '已通知用户。'
-                : '已放入收件箱（当前不宜打断）。'
-              : `未发送：${value.reason}`,
+            text:
+              value?.delivered === true
+                ? value.sink === 'notify'
+                  ? '已通知用户。'
+                  : '已放入收件箱（当前不宜打断）。'
+                : `未发送：${value?.reason ?? '未知原因'}`,
           },
         ],
       },

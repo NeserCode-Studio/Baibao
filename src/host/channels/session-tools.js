@@ -10,6 +10,12 @@
  *   list({ cursor })                         → { items: SessionSummary[] }
  *   page({ address, maxMessages }, signal)   → { records }
  *
+ * Each tool returns a plain string with a `{ type: 'string' }` output schema,
+ * matching `memory_search`. Object schemas here produced
+ * "Cannot read properties of undefined (reading 'length')" inside `render`,
+ * which the model saw as a broken tool — the same failure mode as the earlier
+ * silent `catch`: a wrong shape that reports nothing useful.
+ *
  * Reading is deliberately explicit: the agent searches or names a session, it
  * never silently loads everything.
  */
@@ -46,6 +52,14 @@ async function readSession(ctx, sessionId, limit) {
   })
 }
 
+/** Shared output shape: text in, text out, with a guard for an empty value. */
+const stringOutput = (fallback) => ({
+  schema: { type: 'string' },
+  render: (value) => [
+    { type: 'text', text: typeof value === 'string' && value.trim() !== '' ? value : fallback },
+  ],
+})
+
 export function sessionTools(ctx) {
   return [
     {
@@ -63,50 +77,20 @@ export function sessionTools(ctx) {
         required: ['query'],
         additionalProperties: false,
       },
-      output: {
-        schema: {
-          type: 'object',
-          properties: {
-            hits: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  sessionId: { type: 'string' },
-                  snippet: { type: 'string' },
-                },
-                required: ['sessionId', 'snippet'],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ['hits'],
-          additionalProperties: false,
-        },
-        render: (value) => [
-          {
-            type: 'text',
-            text:
-              value.hits.length === 0
-                ? '没有找到相关的过往对话。'
-                : value.hits.map((hit) => `[${hit.sessionId}] ${hit.snippet}`).join('\n'),
-          },
-        ],
-      },
+      output: stringOutput('没有找到相关的过往对话。'),
       execute: async (input) => {
         const controller = ctx.get('sessionController')
-        if (controller === undefined) return { hits: [] }
+        if (controller === undefined) return '会话检索不可用。'
         try {
-          const result = await controller.search({ query: input.query })
+          const result = await controller.search({ query: String(input.query ?? '') })
           const items = Array.isArray(result?.items) ? result.items : []
-          return {
-            hits: items.slice(0, 10).map((item) => ({
-              sessionId: String(item.sessionId),
-              snippet: String(item.snippet ?? '').slice(0, 200),
-            })),
-          }
-        } catch {
-          return { hits: [] }
+          if (items.length === 0) return '没有找到相关的过往对话。'
+          return items
+            .slice(0, 10)
+            .map((item) => `[${String(item.sessionId)}] ${String(item.snippet ?? '').slice(0, 200)}`)
+            .join('\n')
+        } catch (error) {
+          return `检索失败：${error instanceof Error ? error.message : String(error)}`
         }
       },
     },
@@ -117,61 +101,25 @@ export function sessionTools(ctx) {
         'Titles show which app a conversation happened in (QQ / 微信), so this is how you find the session someone is referring to when you do not know its id.',
       ].join(' '),
       parameters: { type: 'object', properties: {}, additionalProperties: false },
-      output: {
-        schema: {
-          type: 'object',
-          properties: {
-            sessions: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  sessionId: { type: 'string' },
-                  updatedAt: { type: 'string' },
-                  running: { type: 'boolean' },
-                },
-                required: ['sessionId', 'updatedAt', 'running'],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ['sessions'],
-          additionalProperties: false,
-        },
-        render: (value) => [
-          {
-            type: 'text',
-            text:
-              value.sessions.length === 0
-                ? '没有其他会话。'
-                : value.sessions
-                    .map(
-                      (item) =>
-                        `[${item.sessionId}] ${new Date(item.updatedAt).toISOString().slice(0, 16)}${
-                          item.running ? ' (进行中)' : ''
-                        }`,
-                    )
-                    .join('\n'),
-          },
-        ],
-      },
+      output: stringOutput('没有其他会话。'),
       execute: async () => {
         const controller = ctx.get('sessionController')
-        if (controller === undefined) return { sessions: [] }
+        if (controller === undefined) return '会话列表不可用。'
         try {
           const result = await controller.list({})
           const items = Array.isArray(result?.items) ? result.items : []
-          return {
-            sessions: items.slice(0, 20).map((item) => ({
-              sessionId: String(item.sessionId),
-              updatedAt: Number.isFinite(item.updatedAt)
-                ? new Date(item.updatedAt).toISOString()
-                : '',
-              running: item.running === true,
-            })),
-          }
-        } catch {
-          return { sessions: [] }
+          if (items.length === 0) return '没有其他会话。'
+          return items
+            .slice(0, 20)
+            .map((item) => {
+              const when = Number.isFinite(item.updatedAt)
+                ? new Date(item.updatedAt).toISOString().slice(0, 16)
+                : '?'
+              return `[${String(item.sessionId)}] ${when}${item.running === true ? ' (进行中)' : ''}`
+            })
+            .join('\n')
+        } catch (error) {
+          return `列表失败：${error instanceof Error ? error.message : String(error)}`
         }
       },
     },
@@ -185,52 +133,33 @@ export function sessionTools(ctx) {
       parameters: {
         type: 'object',
         properties: {
-          sessionId: { type: 'string', description: 'Session id from session_search or session_list.' },
-          limit: { type: 'number', description: 'How many recent messages to read, 1-30. Defaults to 10.' },
+          sessionId: {
+            type: 'string',
+            description: 'Session id from session_search or session_list.',
+          },
+          limit: {
+            type: 'number',
+            description: 'How many recent messages to read, 1-30. Defaults to 10.',
+          },
         },
         required: ['sessionId'],
         additionalProperties: false,
       },
-      output: {
-        schema: {
-          type: 'object',
-          properties: {
-            messages: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  role: { type: 'string' },
-                  text: { type: 'string' },
-                },
-                required: ['role', 'text'],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ['messages'],
-          additionalProperties: false,
-        },
-        render: (value) => [
-          {
-            type: 'text',
-            text:
-              value.messages.length === 0
-                ? '那个会话没有可读的文字内容。'
-                : value.messages
-                    .map((line) => `${line.role === 'user' ? '用户' : '我'}：${line.text}`)
-                    .join('\n'),
-          },
-        ],
-      },
+      output: stringOutput('那个会话没有可读的文字内容。'),
       execute: async (input) => {
         const limit = Number.isFinite(input.limit)
           ? Math.min(Math.max(Math.trunc(input.limit), 1), 30)
           : 10
+        const sessionId = String(input.sessionId ?? '')
+        if (sessionId === '') return '没有指定会话。'
         try {
-          return { messages: await readSession(ctx, input.sessionId, limit) }
-        } catch {
-          return { messages: [] }
+          const messages = await readSession(ctx, sessionId, limit)
+          if (messages.length === 0) return '那个会话没有可读的文字内容。'
+          return messages
+            .map((line) => `${line.role === 'user' ? '用户' : '我'}：${line.text}`)
+            .join('\n')
+        } catch (error) {
+          return `读取失败：${error instanceof Error ? error.message : String(error)}`
         }
       },
     },
