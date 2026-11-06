@@ -67,11 +67,25 @@ function toText(value) {
   return String(value)
 }
 
+/** Kept small on purpose: a long payload is what made render come back empty. */
+const RENDER_LIMIT = 800
+
+/**
+ * Render the tool's *result*, not its arguments.
+ *
+ * The signature is `render(args, value)` — two parameters. This module declared
+ * one, so the single parameter received `args`: for a no-argument tool that is
+ * `{}`, which is exactly what the UI displayed while the raw result panel beside
+ * it showed the real conversation list.
+ */
 const stringOutput = (fallback) => ({
   schema: { type: 'string' },
-  render: (value) => {
+  render: (_args, value) => {
     const text = toText(value)
-    return [{ type: 'text', text: text.trim() !== '' ? text : fallback }]
+    const trimmed = text.trim() === '' ? fallback : text
+    const shown =
+      trimmed.length > RENDER_LIMIT ? `${trimmed.slice(0, RENDER_LIMIT)}\n…（共 ${trimmed.length} 字）` : trimmed
+    return [{ type: 'text', text: shown }]
   },
 })
 

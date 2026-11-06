@@ -322,7 +322,7 @@ export function pushTools() {
           required: ['delivered', 'sink', 'reason'],
           additionalProperties: false,
         },
-        render: (value) => [
+        render: (_args, value) => [
           {
             type: 'text',
             text:
