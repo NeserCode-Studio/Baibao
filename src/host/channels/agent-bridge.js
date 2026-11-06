@@ -15,6 +15,9 @@
  * a reload.
  */
 import { randomUUID } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
+import path from 'node:path'
+import { defaultRoot } from '../paths.js'
 
 /** One live channel session, reused across messages so context accumulates. */
 let sessionId = null
@@ -30,11 +33,18 @@ function withTurnLock(task) {
   return next
 }
 
-/** Pull plain text out of a message payload, whatever shape it arrives in. */
+/**
+ * Pull plain text out of a committed message event.
+ *
+ * The payload nests the message one level down:
+ *   { message: { role: 'assistant', content: [{ type: 'text', text }] } }
+ * Older or other event shapes put `content` at the top, so both are accepted.
+ */
 export function extractText(data) {
-  if (typeof data?.text === 'string') return data.text
-  if (Array.isArray(data?.content)) {
-    return data.content
+  const message = data?.message ?? data
+  if (typeof message?.text === 'string') return message.text
+  if (Array.isArray(message?.content)) {
+    return message.content
       .filter((block) => block?.type === 'text' && typeof block.text === 'string')
       .map((block) => block.text)
       .join('')
@@ -90,7 +100,7 @@ async function ensureSession(ctx) {
  * @param options.log        (level, detail) => void
  */
 export async function askAgent(ctx, text, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 90_000
+  const timeoutMs = options.timeoutMs ?? 60_000
   const log = options.log ?? (() => {})
 
   return withTurnLock(async () => {
@@ -99,13 +109,16 @@ export async function askAgent(ctx, text, options = {}) {
     const abort = new AbortController()
     let iterator = null
     let reply = ''
+    let settle = null
+    const answered = new Promise((resolve) => {
+      settle = resolve
+    })
     let settled = false
-
     const finish = (value) => {
       if (settled) return
       settled = true
       reply = value
-      abort.abort()
+      settle(value)
     }
 
     try {
@@ -113,23 +126,28 @@ export async function askAgent(ctx, text, options = {}) {
         .follow({ address: { kind: 'session', sessionId: target }, assistantStream: true }, abort.signal)
         [Symbol.asyncIterator]()
 
-      // Collect in the background so the prompt is not blocked behind the
-      // subscription's opening snapshot.
-      const pump = (async () => {
-        for (;;) {
-          const next = await iterator.next()
-          if (next.done === true) return
-          const frame = next.value
-          if (frame?.type !== 'event') continue
-          const type = frame.event?.type
-          if (!isAssistantEvent(type)) continue
-          const value = extractText(frame.event?.data).trim()
-          if (value !== '') finish(value)
+      const seenTypes = new Set()
+      void (async () => {
+        try {
+          for (;;) {
+            const next = await iterator.next()
+            if (next.done === true) return
+            const frame = next.value
+            if (frame?.type !== 'event') continue
+            const type = frame.event?.type
+            if (typeof type === 'string' && !seenTypes.has(type)) {
+              seenTypes.add(type)
+              log('debug', `event type: ${type}`)
+            }
+            if (!isAssistantEvent(type)) continue
+            const value = extractText(frame.event?.data).trim()
+            if (value !== '') finish(value)
+          }
+        } catch (error) {
+          log('error', `follow: ${error instanceof Error ? error.message : String(error)}`)
+          finish('')
         }
-      })().catch((error) => {
-        log('error', `follow: ${error instanceof Error ? error.message : String(error)}`)
-        finish('')
-      })
+      })()
 
       const accepted = await controller.prompt(
         {
@@ -145,16 +163,20 @@ export async function askAgent(ctx, text, options = {}) {
         return ''
       }
 
+      // Wait on the reply signal, not on the subscription: an iterator that
+      // does not honour abort would otherwise hold the turn open forever.
       const timer = setTimeout(() => finish(''), timeoutMs)
-      await pump
+      const value = await answered
       clearTimeout(timer)
-      return settled ? reply : ''
+      if (value === '') log('debug', 'no assistant event before timeout')
+      return value
     } catch (error) {
       log('error', `ask: ${error instanceof Error ? error.message : String(error)}`)
       // A dead session is the common failure; drop it so the next turn rebuilds.
       sessionId = null
       return ''
     } finally {
+      finish('')
       abort.abort()
     }
   })
