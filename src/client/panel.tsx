@@ -26,7 +26,7 @@ import { Button } from './ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card'
 import { Label } from './ui/label'
 import { Switch } from './ui/switch'
-import { cn } from './ui/cn'
+import { cn } from './ui/utils'
 import { Input } from './ui/input'
 import {
   getChannels,
@@ -1288,11 +1288,12 @@ function Field({
 }
 
 /** Map a connection state onto the badge's tones. */
-function stateTone(state: string): 'neutral' | 'success' | 'warning' | 'danger' {
-  if (state === 'ready') return 'success'
-  if (state === 'connecting' || state === 'reconnecting') return 'warning'
-  if (state === 'error' || state === 'fatal' || state === 'expired') return 'danger'
-  return 'neutral'
+/** Dot colour for a connection state, used inside the shadcn Badge. */
+function stateDot(state: string): string {
+  if (state === 'ready') return 'bg-emerald-500'
+  if (state === 'connecting' || state === 'reconnecting') return 'bg-amber-500'
+  if (state === 'error' || state === 'fatal' || state === 'expired') return 'bg-red-500'
+  return 'bg-muted-foreground'
 }
 
 /**
@@ -1389,7 +1390,8 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           <CardTitle>{t('channelQqTitle')}</CardTitle>
           <CardDescription>{t('channelQqBody')}</CardDescription>
         </div>
-        <Badge tone={stateTone(status.state)} role="status">
+        <Badge variant="outline" className="gap-1.5 rounded-full font-medium" role="status">
+          <span className={cn('size-1.5 rounded-full', stateDot(status.state))} aria-hidden="true" />
           {t(stateKey)}
         </Badge>
       </CardHeader>

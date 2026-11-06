@@ -13,7 +13,11 @@
     "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
-    "types": []
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/client/*"]
+    }
   },
   "include": ["src"]
 }

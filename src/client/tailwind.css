@@ -1,47 +1,47 @@
 /**
- * Tailwind entry for the Baibao panel.
+ * Theme values for the shadcn components used in this panel.
  *
- * The panel is embedded in the DSH shell, so the theme aliases point at the
- * shell's own design tokens rather than at fixed colours.
- *
- * **Preflight stays on.** Disabling it was a mistake: preflight does more than
- * reset margins — it initialises the `--tw-*` custom properties that transform
- * utilities read. Without it `translate-x-*` declared a value and computed to
- * nothing, so the switch's thumb never moved.
- *
- * It is safe here because `important: '.bb-root'` scopes preflight too: the
- * generated reset reads `.bb-root *`, not `*`, and a scan of the output finds no
- * rule escaping that scope. The host shell is untouched.
- *
- * Colours are aliased onto the shell's tokens, but not all of them can be
- * borrowed: the three `--dsw-alias-bg-layer-*` tokens all resolve to `#fff`, and
- * the border token is 4% alpha. Any layer drawn from those has no visible edge,
- * so tints are mixed from the label colour instead — still theme-driven, but
- * with enough separation to see.
+ * Names are shadcn's; only the values are ours. Where the shell provides a
+ * usable token it is aliased directly. Where it does not — the three surface
+ * layers all resolve to `#fff`, the border token is 4% alpha — a value is mixed
+ * from the label colour so the result still follows the theme but has enough
+ * separation to be visible.
  */
 @tailwind components;
 @tailwind utilities;
 
 :root,
 .bb-root {
+  --bb-radius: 0.5rem;
+
   --bb-background: var(--dsw-alias-bg-base, #ffffff);
   --bb-foreground: var(--dsw-alias-label-primary, #1f2328);
-  --bb-surface: var(--dsw-alias-bg-layer-1, #ffffff);
 
-  /* Surfaces with no hierarchy upstream: derive them from the label colour. */
+  /* Elevation: the shell's layers are identical, so cards get their own tint. */
+  --bb-card: color-mix(in srgb, var(--bb-foreground) 3%, var(--bb-background));
+  --bb-card-foreground: var(--bb-foreground);
+  --bb-popover: var(--bb-background);
+  --bb-popover-foreground: var(--bb-foreground);
+
+  /* Primary stays the shell's brand colour; it is near-black in this theme. */
+  --bb-primary: var(--dsw-alias-brand-primary, #0f1115);
+  --bb-primary-foreground: var(--dsw-alias-bg-base, #ffffff);
+
+  --bb-secondary: color-mix(in srgb, var(--bb-foreground) 6%, var(--bb-background));
+  --bb-secondary-foreground: var(--bb-foreground);
+
   --bb-muted: color-mix(in srgb, var(--bb-foreground) 4%, var(--bb-background));
   --bb-muted-foreground: var(--dsw-alias-label-secondary, #5c6570);
 
-  /* The shell's own border token is 4% alpha, which disappears on white. */
-  --bb-border: color-mix(in srgb, var(--bb-foreground) 14%, transparent);
-  /* Switch track: darker than a border, so the thumb reads against it. */
-  --bb-track: color-mix(in srgb, var(--bb-foreground) 24%, transparent);
-
-  --bb-primary: var(--dsw-alias-brand-primary, #4f6ef7);
-  --bb-primary-foreground: var(--dsw-alias-bg-base, #ffffff);
-  --bb-destructive: var(--dsw-alias-state-error-primary, #d93f3f);
-  --bb-destructive-foreground: #ffffff;
   --bb-accent: color-mix(in srgb, var(--bb-foreground) 8%, var(--bb-background));
   --bb-accent-foreground: var(--bb-foreground);
-  --bb-ring: var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary, #4f6ef7));
+
+  --bb-destructive: var(--dsw-alias-state-error-primary, #d93f3f);
+  --bb-destructive-foreground: #ffffff;
+
+  /* The shell's border token is 4% alpha — invisible on white. */
+  --bb-border: color-mix(in srgb, var(--bb-foreground) 14%, transparent);
+  /* Unchecked switch track and input outlines need more than a border. */
+  --bb-input: color-mix(in srgb, var(--bb-foreground) 22%, transparent);
+  --bb-ring: var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary, #0f1115));
 }

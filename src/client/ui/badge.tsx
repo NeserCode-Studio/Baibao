@@ -1,47 +1,36 @@
-/**
- * shadcn/ui badge, used for connection state.
- *
- * The dot is a separate element rather than a background colour: a filled pill
- * reads as a button and competes with the settings around it, while a dot plus a
- * word carries the same meaning quietly.
- */
-import { cva, type VariantProps } from 'class-variance-authority'
-import type { HTMLAttributes } from 'react'
-import { cn } from './cn'
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+
+import { cn } from "@/ui/utils"
 
 const badgeVariants = cva(
-  'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium',
+  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
-      tone: {
-        neutral: 'bg-background text-muted-foreground',
-        success: 'bg-background text-muted-foreground',
-        warning: 'bg-background text-muted-foreground',
-        danger: 'bg-background text-muted-foreground',
+      variant: {
+        default:
+          "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        destructive:
+          "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
+        outline: "text-foreground",
       },
     },
-    defaultVariants: { tone: 'neutral' },
-  },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
 )
 
-const dotTone: Record<string, string> = {
-  neutral: 'bg-muted-foreground',
-  success: 'bg-emerald-500',
-  warning: 'bg-amber-500',
-  danger: 'bg-red-500',
-}
+export interface BadgeProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof badgeVariants> {}
 
-export type BadgeProps = HTMLAttributes<HTMLSpanElement> &
-  VariantProps<typeof badgeVariants> & {
-    /** Colour of the leading dot. */
-    tone?: 'neutral' | 'success' | 'warning' | 'danger'
-  }
-
-export function Badge({ className, tone = 'neutral', children, ...props }: BadgeProps) {
+function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <span className={cn(badgeVariants({ tone }), className)} {...props}>
-      <span className={cn('size-1.5 rounded-full', dotTone[tone ?? 'neutral'])} aria-hidden="true" />
-      {children}
-    </span>
+    <div className={cn(badgeVariants({ variant }), className)} {...props} />
   )
 }
+
+export { Badge, badgeVariants }

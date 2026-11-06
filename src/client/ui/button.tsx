@@ -1,55 +1,57 @@
-/**
- * shadcn/ui button, adapted for an embedded panel.
- *
- * The component body is shadcn's; what changed is the scale. The shell's panel is
- * compact (11–12px labels), so the default size is smaller than shadcn's and the
- * focus ring stays visible — an embedded panel that drops focus outlines makes
- * keyboard navigation unusable inside the host.
- */
-import { Slot } from '@radix-ui/react-slot'
-import { cva, type VariantProps } from 'class-variance-authority'
-import type { ButtonHTMLAttributes } from 'react'
-import { cn } from './cn'
+import * as React from "react"
+import { Slot } from "@radix-ui/react-slot"
+import { cva, type VariantProps } from "class-variance-authority"
+
+import { cn } from "@/ui/utils"
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 rounded-input font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        // Foreground-on-background is self-inverting: in a dark theme the
-        // foreground goes light and the label goes dark, with no separate token
-        // to keep in sync.
-        default: 'bg-foreground text-background hover:opacity-90',
-        secondary: 'bg-muted text-foreground hover:bg-accent',
-        outline: 'border border-border bg-transparent text-foreground hover:bg-muted',
-        ghost: 'text-foreground hover:bg-muted',
-        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
+        default:
+          "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        destructive:
+          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+        outline:
+          "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
+        secondary:
+          "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        // Standard font sizes only: 	ailwind-merge groups any 	ext-* token as
-        // the same property unless it recognises the value, and a custom size
-        // name made it treat the size as a colour and override the variant.
-        default: 'h-7 px-3 text-xs',
-        sm: 'h-6 px-2 text-[11px]',
-        icon: 'size-7',
+        default: "h-9 px-4 py-2",
+        sm: "h-8 rounded-md px-3 text-xs",
+        lg: "h-10 rounded-md px-8",
+        icon: "h-9 w-9",
       },
     },
     defaultVariants: {
-      variant: 'default',
-      size: 'default',
+      variant: "default",
+      size: "default",
     },
-  },
+  }
 )
 
-export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonVariants> & {
-    /** Render as the child element, e.g. an anchor. */
-    asChild?: boolean
-  }
-
-export function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
-  const Component = asChild ? Slot : 'button'
-  return <Component className={cn(buttonVariants({ variant, size }), className)} {...props} />
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean
 }
 
-export { buttonVariants }
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button"
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+      />
+    )
+  }
+)
+Button.displayName = "Button"
+
+export { Button, buttonVariants }

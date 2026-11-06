@@ -1,25 +1,22 @@
-/**
- * shadcn/ui input, sized for the embedded panel.
- *
- * Labels are paired outside the component: the panel's forms are dense, and a
- * placeholder standing in for a label is the most common accessibility failure
- * in settings panels.
- */
-import type { InputHTMLAttributes } from 'react'
-import { cn } from './cn'
+import * as React from "react"
 
-export function Input({ className, type = 'text', ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      type={type}
-      className={cn(
-        'h-7 w-full min-w-0 rounded-input border border-border bg-background px-2 text-body text-foreground',
-        'placeholder:text-muted-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        className,
-      )}
-      {...props}
-    />
-  )
-}
+import { cn } from "@/ui/utils"
+
+const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
+  ({ className, type, ...props }, ref) => {
+    return (
+      <input
+        type={type}
+        className={cn(
+          "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+          className
+        )}
+        ref={ref}
+        {...props}
+      />
+    )
+  }
+)
+Input.displayName = "Input"
+
+export { Input }
