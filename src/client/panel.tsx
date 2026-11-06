@@ -21,7 +21,11 @@ import {
 } from './notifications-api'
 import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
 import { getPush, savePush, type PushState } from './push-api'
+import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card'
+import { Label } from './ui/label'
+import { Switch } from './ui/switch'
 import { cn } from './ui/cn'
 import { Input } from './ui/input'
 import {
@@ -1274,12 +1278,7 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <label
-        htmlFor={htmlFor}
-        className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-      >
-        {label}
-      </label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {hint !== undefined && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>
@@ -1288,29 +1287,20 @@ function Field({
   )
 }
 
+/** Map a connection state onto the badge's tones. */
+function stateTone(state: string): 'neutral' | 'success' | 'warning' | 'danger' {
+  if (state === 'ready') return 'success'
+  if (state === 'connecting' || state === 'reconnecting') return 'warning'
+  if (state === 'error' || state === 'fatal' || state === 'expired') return 'danger'
+  return 'neutral'
+}
+
 /**
  * Connection state as a dot plus a word.
  *
  * A filled colour block reads as a button and pulls the eye away from the
  * settings; a dot carries the same signal at a fraction of the weight.
  */
-function StatusPill({ state, label }: { state: string; label: string }) {
-  const tone =
-    state === 'ready'
-      ? 'bg-emerald-500'
-      : state === 'connecting' || state === 'reconnecting'
-        ? 'bg-amber-500'
-        : state === 'error' || state === 'fatal' || state === 'expired'
-          ? 'bg-red-500'
-          : 'bg-muted-foreground'
-  return (
-    <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-      <span className={cn('size-1.5 rounded-full', tone)} aria-hidden="true" />
-      {label}
-    </span>
-  )
-}
-
 function QqChannel({ t }: { t: TranslateBaibao }) {
   const [channel, setChannel] = useState<ChannelInfo | null>(null)
   const [status, setStatus] = useState<ChannelStatusEntry>({ state: 'unknown' })
@@ -1393,22 +1383,22 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           : 'channelStateIdle'
 
   return (
-    <div className="rounded-xl border border-border bg-muted p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h3 className="text-[13px] font-semibold leading-tight text-foreground">
-            {t('channelQqTitle')}
-          </h3>
-          <p className="text-[11px] leading-relaxed text-muted-foreground">{t('channelQqBody')}</p>
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>{t('channelQqTitle')}</CardTitle>
+          <CardDescription>{t('channelQqBody')}</CardDescription>
         </div>
-        <StatusPill state={status.state} label={t(stateKey)} />
-      </div>
+        <Badge tone={stateTone(status.state)} role="status">
+          {t(stateKey)}
+        </Badge>
+      </CardHeader>
 
-      <div className="mt-4 space-y-3.5">
+      <CardContent className="space-y-3.5">
         <Field label={t('channelAppId')} htmlFor="bb-qq-appid">
           <Input
             id="bb-qq-appid"
-            className="h-8 text-[12px]"
+            className="h-8"
             value={appId}
             spellCheck={false}
             autoComplete="off"
@@ -1423,7 +1413,7 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
           <Input
             id="bb-qq-secret"
             type="password"
-            className="h-8 text-[12px]"
+            className="h-8"
             value={appSecret}
             spellCheck={false}
             autoComplete="new-password"
@@ -1442,7 +1432,7 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
         >
           <Input
             id="bb-qq-users"
-            className="h-8 text-[12px]"
+            className="h-8"
             value={users}
             spellCheck={false}
             placeholder={t('channelAllowedUsersHint')}
@@ -1452,27 +1442,24 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
             }}
           />
         </Field>
-      </div>
 
-      <label className="mt-4 flex cursor-pointer items-center gap-2 text-[12px] text-foreground">
-        <input
-          type="checkbox"
-          className="size-3.5 cursor-pointer accent-[var(--bb-primary)]"
-          checked={enabled}
-          onChange={(event) => {
-            setEnabled(event.target.checked)
-            setPhase('ready')
-          }}
-        />
-        <span>{t('channelEnable')}</span>
-      </label>
+        <div className="flex items-center gap-2.5">
+          <Switch
+            id="bb-qq-enabled"
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setEnabled(checked)
+              setPhase('ready')
+            }}
+          />
+          <Label htmlFor="bb-qq-enabled" className="cursor-pointer normal-case tracking-normal text-[12px]">
+            {t('channelEnable')}
+          </Label>
+        </div>
+      </CardContent>
 
-      <div className="mt-4 flex items-center gap-2">
-        <Button
-          className="h-8 px-3.5"
-          onClick={submit}
-          disabled={phase === 'loading' || phase === 'saving'}
-        >
+      <CardFooter>
+        <Button className="h-8 px-3.5" onClick={submit} disabled={phase === 'loading' || phase === 'saving'}>
           {t('consolidationSave')}
         </Button>
         {channel?.hasSecret === true && (
@@ -1495,8 +1482,8 @@ function QqChannel({ t }: { t: TranslateBaibao }) {
             {t('channelFailed')}
           </span>
         )}
-      </div>
-    </div>
+      </CardFooter>
+    </Card>
   )
 }
 
@@ -1516,8 +1503,8 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
       <IdentityCard t={t} />
       <PushSettingsCard t={t} />
       <div className="bb-grid bb-gridTwo">
-        <Card title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />
-        <Card title={t('connectionsTriggerTitle')} body={t('connectionsTriggerBody')} badge={t('planned')} />
+        <InfoCard title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />
+        <InfoCard title={t('connectionsTriggerTitle')} body={t('connectionsTriggerBody')} badge={t('planned')} />
       </div>
       <Inbox t={t} />
     </section>
@@ -1766,7 +1753,7 @@ function SettingsSection({ t, hidden, onPickDirectory }: SectionProps) {
       <SectionHead title={t('storageTitle')} body={t('storageBody')} />
       <StorageSettings t={t} onPickDirectory={onPickDirectory} />
       <div className="bb-grid">
-        <Card
+        <InfoCard
           title={t('agentModeTitle')}
           body={t('agentModeBody')}
           badge={t('agentModeDefault')}
@@ -1775,8 +1762,8 @@ function SettingsSection({ t, hidden, onPickDirectory }: SectionProps) {
       <SectionHead title={t('settingsTitle')} body={t('settingsBody')} />
       <ConsolidationSettings t={t} />
       <div className="bb-grid bb-gridTwo">
-        <Card title={t('settingsLocalTitle')} body={t('settingsLocalBody')} badge={t('planned')} />
-        <Card title={t('settingsMirrorTitle')} body={t('settingsMirrorBody')} badge={t('planned')} />
+        <InfoCard title={t('settingsLocalTitle')} body={t('settingsLocalBody')} badge={t('planned')} />
+        <InfoCard title={t('settingsMirrorTitle')} body={t('settingsMirrorBody')} badge={t('planned')} />
       </div>
     </section>
   )
@@ -2203,7 +2190,7 @@ function SectionHead({ title, body }: { title: string; body: string }) {
   )
 }
 
-function Card({ title, body, badge }: { title: string; body: string; badge: string }) {
+function InfoCard({ title, body, badge }: { title: string; body: string; badge: string }) {
   return (
     <article className="bb-card">
       <div className="bb-cardTop">
