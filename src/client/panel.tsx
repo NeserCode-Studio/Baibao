@@ -20,6 +20,7 @@ import {
   type NotificationEntry,
 } from './notifications-api'
 import { getConfig, saveConsolidationModel, type ModelChoice } from './config-api'
+import { getPush, savePush, type PushState } from './push-api'
 import {
   getChannels,
   saveChannel,
@@ -775,6 +776,166 @@ function MemoryList({ t }: BaibaoPanelProps) {
 }
 
 /**
+ * Push settings: when Baibao may interrupt, and how often.
+ *
+ * These were fixed at their documented defaults before; the rule gate honoured
+ * quiet hours and a daily budget that nobody could edit.
+ */
+function PushSettingsCard({ t }: { t: TranslateBaibao }) {
+  const [state, setState] = useState<PushState | null>(null)
+  const [enabled, setEnabled] = useState(true)
+  const [focusMode, setFocusMode] = useState(false)
+  const [budget, setBudget] = useState('3')
+  const [start, setStart] = useState('22:00')
+  const [end, setEnd] = useState('08:00')
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading')
+
+  const apply = (next: PushState): void => {
+    setState(next)
+    setEnabled(next.settings.enabled)
+    setFocusMode(next.settings.focusMode)
+    setBudget(String(next.settings.dailyBudget))
+    setStart(next.settings.quietHours.start)
+    setEnd(next.settings.quietHours.end)
+  }
+
+  useEffect(() => {
+    let live = true
+    void getPush().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        apply(result)
+        setPhase('ready')
+      } else {
+        setPhase('error')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const submit = (): void => {
+    setPhase('saving')
+    void savePush({
+      enabled,
+      focusMode,
+      dailyBudget: Number(budget),
+      quietHours: { start, end },
+    }).then((result) => {
+      if (result.ok) {
+        apply(result)
+        setPhase('saved')
+      } else {
+        setPhase('error')
+      }
+    })
+  }
+
+  return (
+    <div className="bb-channel">
+      <div className="bb-jungRowTop">
+        <span className="bb-jungBlockTitle">{t('pushTitle')}</span>
+        {state !== null && (
+          <span className="bb-channelState">
+            {t('pushToday').replace('{count}', String(state.notifiedToday))}
+          </span>
+        )}
+      </div>
+      <p className="bb-storageHint">{t('pushBody')}</p>
+
+      <label className="bb-channelToggle">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => {
+            setEnabled(event.target.checked)
+            setPhase('ready')
+          }}
+        />
+        <span>{t('pushEnabled')}</span>
+      </label>
+
+      <label className="bb-channelToggle">
+        <input
+          type="checkbox"
+          checked={focusMode}
+          onChange={(event) => {
+            setFocusMode(event.target.checked)
+            setPhase('ready')
+          }}
+        />
+        <span>{t('pushFocus')}</span>
+      </label>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel">{t('pushQuietHours')}</label>
+        <input
+          type="time"
+          className="bb-memorySearchInput"
+          value={start}
+          onChange={(event) => {
+            setStart(event.target.value)
+            setPhase('ready')
+          }}
+        />
+        <span className="bb-storageHint">—</span>
+        <input
+          type="time"
+          className="bb-memorySearchInput"
+          value={end}
+          onChange={(event) => {
+            setEnd(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+
+      <div className="bb-channelRow">
+        <label className="bb-consolidationLabel" htmlFor="bb-push-budget">
+          {t('pushBudget')}
+        </label>
+        <input
+          id="bb-push-budget"
+          type="number"
+          min={0}
+          max={50}
+          className="bb-memorySearchInput"
+          value={budget}
+          onChange={(event) => {
+            setBudget(event.target.value)
+            setPhase('ready')
+          }}
+        />
+      </div>
+      <p className="bb-storageHint">{t('pushBudgetBody')}</p>
+
+      <div className="bb-personaActions">
+        <button
+          type="button"
+          className="bb-personaBtn"
+          onClick={submit}
+          disabled={phase === 'loading' || phase === 'saving'}
+        >
+          {t('consolidationSave')}
+        </button>
+      </div>
+
+      {phase === 'saved' && (
+        <p className="bb-storageOk" role="status">
+          {t('consolidationSaved')}
+        </p>
+      )}
+      {phase === 'error' && (
+        <p className="bb-storageError" role="alert">
+          {t('channelFailed')}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * QQ bot connection form.
  *
  * The secret is write-only: the host never sends it back, so the field starts
@@ -977,6 +1138,7 @@ function ConnectionsSection({ t, hidden }: SectionProps) {
     >
       <SectionHead title={t('connectionsTitle')} body={t('connectionsBody')} />
       <QqChannel t={t} />
+      <PushSettingsCard t={t} />
       <div className="bb-grid bb-gridTwo">
         <Card title={t('connectionsQuietTitle')} body={t('connectionsQuietBody')} badge={t('planned')} />
         <Card title={t('connectionsTriggerTitle')} body={t('connectionsTriggerBody')} badge={t('planned')} />

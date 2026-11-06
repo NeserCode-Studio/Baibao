@@ -19,9 +19,12 @@ import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { defaultRoot } from '../paths.js'
 
-/** One live channel session, reused across messages so context accumulates. */
-let sessionId = null
-/** Serialises turns: two prompts at once would interleave in one inbox. */
+/**
+ * One live session per chat, so two people talking to the same bot do not read
+ * each other's conversation.
+ */
+const sessions = new Map()
+/** Serialises turns per chat: two prompts into one inbox would interleave. */
 let queue = Promise.resolve()
 
 function withTurnLock(task) {
@@ -58,35 +61,49 @@ export function isAssistantEvent(type) {
 }
 
 /**
- * Create the channel session, or reuse the live one.
+ * Create the session for one chat, or reuse the live one.
+ *
+ * The session is also attached to the Baibao workspace through
+ * `insertSessionBefore`. Workspace membership is an explicit `sessionIds` array
+ * rather than something derived from `cwd`, so without that call the session
+ * shows up under "ungrouped" even though its working directory is right.
  *
  * A disposed or archived session must not wedge the channel forever, so the
  * caller rebuilds on failure rather than caching blindly.
  */
-async function ensureSession(ctx) {
+async function ensureSession(ctx, key) {
   const controller = ctx.get('sessionController')
-  const registry = ctx.get('workspaceRegistry')
-  if (controller === undefined || registry === undefined) throw new Error('dsh-services-missing')
+  const workspaces = ctx.get('workspaceController')
+  if (controller === undefined || workspaces === undefined) throw new Error('dsh-services-missing')
 
-  if (sessionId !== null) {
+  const cached = sessions.get(key)
+  if (cached !== undefined) {
     try {
-      const resolved = await controller.resolveAgent(sessionId)
-      if (resolved?.agent !== undefined) return { controller, sessionId }
+      const resolved = await controller.resolveAgent(cached)
+      if (resolved?.agent !== undefined) return { controller, sessionId: cached }
     } catch {
       // Gone or archived: fall through and make a new one.
     }
-    sessionId = null
+    sessions.delete(key)
   }
 
-  const { defaultRoot } = await import('../paths.js')
-  const { mkdir } = await import('node:fs/promises')
-  const path = await import('node:path')
   const workspaceDir = path.join(defaultRoot(), 'workspace')
   await mkdir(workspaceDir, { recursive: true })
-  const workspace = await registry.create(workspaceDir, '百宝')
+  // Idempotent: resolves the existing Baibao workspace when there is one.
+  const { workspace } = await workspaces.create({ path: workspaceDir })
   const created = await controller.create({ cwd: workspace.path, agentPreset: 'baibao' })
-  sessionId = created.sessionId
-  return { controller, sessionId }
+
+  try {
+    await workspaces.insertSessionBefore({
+      workspaceId: workspace.workspaceId,
+      sessionId: created.sessionId,
+    })
+  } catch {
+    // Grouping is cosmetic; a conversation that works beats one filed neatly.
+  }
+
+  sessions.set(key, created.sessionId)
+  return { controller, sessionId: created.sessionId }
 }
 
 /**
@@ -102,9 +119,11 @@ async function ensureSession(ctx) {
 export async function askAgent(ctx, text, options = {}) {
   const timeoutMs = options.timeoutMs ?? 60_000
   const log = options.log ?? (() => {})
+  // One conversation per chat identity; two senders must not share memory.
+  const key = options.chatId ?? 'default'
 
   return withTurnLock(async () => {
-    const { controller, sessionId: target } = await ensureSession(ctx)
+    const { controller, sessionId: target } = await ensureSession(ctx, key)
 
     const abort = new AbortController()
     let iterator = null
@@ -173,7 +192,7 @@ export async function askAgent(ctx, text, options = {}) {
     } catch (error) {
       log('error', `ask: ${error instanceof Error ? error.message : String(error)}`)
       // A dead session is the common failure; drop it so the next turn rebuilds.
-      sessionId = null
+      sessions.delete(key)
       return ''
     } finally {
       finish('')
@@ -182,7 +201,7 @@ export async function askAgent(ctx, text, options = {}) {
   })
 }
 
-/** Forget the cached session (used when the channel stops). */
-export function resetChannelSession() {
-  sessionId = null
+/** Forget every cached session (used when the channel stops). */
+export function resetChannelSessions() {
+  sessions.clear()
 }

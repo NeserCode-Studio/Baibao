@@ -30,6 +30,7 @@ import { registerConfigRoutes } from './host/routes/config.js'
 import { registerMemoryRoutes } from './host/routes/memory.js'
 import { registerNotificationRoutes } from './host/routes/notifications.js'
 import { registerPersonaRoutes } from './host/routes/persona.js'
+import { registerPushRoutes } from './host/routes/push.js'
 import { registerStorageRoutes } from './host/routes/storage.js'
 
 export const name = 'dsh-baibao'
@@ -102,6 +103,8 @@ export function apply(ctx) {
         return
       }
       const reply = await askAgent(ctx, message.content, {
+        // Each sender gets their own conversation.
+        chatId: message.openid,
         log: (level, detail) => console.error(`[baibao:channel] ${level} ${detail}`),
       })
       await sendChannelText(
@@ -140,6 +143,7 @@ export function apply(ctx) {
     registerPersonaRoutes(ctx, hostCtx)
     registerConfigRoutes(ctx, hostCtx)
     registerChannelRoutes(ctx, hostCtx)
+    registerPushRoutes(ctx, hostCtx)
     registerChatRoutes(ctx, hostCtx, {
       presetsReady: state.presetsReady,
       setWorkspacePath: (value) => {
